@@ -60,8 +60,8 @@ struct MQTT_Settings
     Config<String> Publish_Topic;
     Config<String> mqtt_Settings_ShowerTime_topic;
     Config<String> mqtt_Settings_SetShowerTime_topic;
-    Config<String> MQTTPublischPeriod;
-    Config<String> MQTTListenPeriod;
+    Config<float> MQTTPublischPeriod;
+    Config<float> MQTTListenPeriod;
 
 
     // For dynamic topics based on Publish_Topic
@@ -77,8 +77,8 @@ struct MQTT_Settings
                       Publish_Topic(ConfigOptions<String>{.keyName = "MQTTT", .category = "MQTT", .defaultValue = String("BoilerSaver"), .prettyName = "Publish-Topic", }),
                       mqtt_Settings_ShowerTime_topic(ConfigOptions<String>{.keyName = "ShowerT", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/ShowerTime"), .prettyName = "Shower-Time Topic", .showInWeb = true, .isPassword = false}),
                       mqtt_Settings_SetShowerTime_topic(ConfigOptions<String>{.keyName = "SetShower", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/SetShowerTime"), .prettyName = "Set-Shower-Time Topic", .showInWeb = true, .isPassword = false}),
-                      MQTTPublischPeriod(ConfigOptions<String>{.keyName = "PubPeriod", .category = "MQTT", .defaultValue = String("60"), .prettyName = "Publish-Period (s)", }),
-                      MQTTListenPeriod(ConfigOptions<String>{.keyName = "ListenPeriod", .category = "MQTT", .defaultValue = String("60"), .prettyName = "Listen-Period (s)", }),
+                      MQTTPublischPeriod(ConfigOptions<float>{.keyName = "PubPeriod", .category = "MQTT", .defaultValue = 2.0f, .prettyName = "Publish-Period (s)", }),
+                      MQTTListenPeriod(ConfigOptions<float>{.keyName = "ListenPeriod", .category = "MQTT", .defaultValue = 0.5f, .prettyName = "Listen-Period (s)", })
 
     {
         cfg.addSetting(&mqtt_port);
@@ -92,8 +92,7 @@ struct MQTT_Settings
         cfg.addSetting(&MQTTListenPeriod);
 
         // Callback to update topics when Publish_Topic changes
-        Publish_Topic.setCallback([this](String newValue)
-                                  { this->updateTopics(); });
+        Publish_Topic.setCallback([this](String newValue){ this->updateTopics(); });
 
         updateTopics(); // Make sure topics are initialized
     }

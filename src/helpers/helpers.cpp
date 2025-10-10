@@ -38,63 +38,6 @@ void  Helpers::blinkBuidInLED(int BlinkCount, int blinkRate)
 }
 
 
-// ------------------------------------------------------------------
-// Non-blocking status LED pattern
-//  States / patterns:
-//   - AP mode: fast blink (100ms on / 100ms off)
-//   - Connected STA: slow heartbeat (on 60ms every 2s)
-//   - Connecting / disconnected: double blink (2 quick pulses every 1s)
-// ------------------------------------------------------------------
-void updateStatusLED() {
-    static unsigned long lastChange = 0;
-    static uint8_t phase = 0;
-    unsigned long now = millis();
-
-    bool apMode = WiFi.getMode() == WIFI_AP;
-    bool connected = !apMode && WiFi.status() == WL_CONNECTED;
-
-    if (apMode) {
-        // simple fast blink 5Hz (100/100)
-        if (now - lastChange >= 100) {
-            lastChange = now;
-            digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-        }
-        return;
-    }
-
-    if (connected) {
-        // heartbeat: brief flash every 2s
-        switch (phase) {
-            case 0: // LED off idle
-                if (now - lastChange >= 2000) { phase = 1; lastChange = now; digitalWrite(LED_BUILTIN, HIGH); }
-                break;
-            case 1: // LED on briefly
-                if (now - lastChange >= 60) { phase = 0; lastChange = now; digitalWrite(LED_BUILTIN, LOW); }
-                break;
-        }
-        return;
-    }
-
-    // disconnected / connecting: double blink every ~1s
-    switch (phase) {
-        case 0: // idle off
-            if (now - lastChange >= 1000) { phase = 1; lastChange = now; digitalWrite(LED_BUILTIN, HIGH); }
-            break;
-        case 1: // first on
-            if (now - lastChange >= 80) { phase = 2; lastChange = now; digitalWrite(LED_BUILTIN, LOW); }
-            break;
-        case 2: // gap
-            if (now - lastChange >= 120) { phase = 3; lastChange = now; digitalWrite(LED_BUILTIN, HIGH); }
-            break;
-        case 3: // second on
-            if (now - lastChange >= 80) { phase = 4; lastChange = now; digitalWrite(LED_BUILTIN, LOW); }
-            break;
-        case 4: // tail gap back to idle
-            if (now - lastChange >= 200) { phase = 0; lastChange = now; }
-            break;
-    }
-}
-
 
 /** info
  * @brief blinkBuidInLEDsetpinMode() initializes the built-in LED pin mode as an output.

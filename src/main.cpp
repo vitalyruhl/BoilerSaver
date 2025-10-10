@@ -27,6 +27,9 @@ bool SetupStartWebServer();
 void CheckButtons();
 void ShowDisplay();
 void ShowDisplayOff();
+void updateStatusLED();
+void PinSetup();
+
 //--------------------------------------------------------------------------------------------------------------
 
 #pragma region configuration variables
@@ -547,12 +550,6 @@ void PinSetup()
   Relays::initPins();
   // Force known OFF state
   Relays::setBoiler(false);
-  // Simple validation: warn if same pin used for both or invalid
-  int fanPin = fanSettings.relayPin.get();
-  int heaterPin = heaterSettings.relayPin.get();
-  if(fanPin == heaterPin && heaterSettings.enabled.get()){
-    sl->Error("Relay config: Fan and Heater share same GPIO! This may cause conflicts.");
-  }
 }
 
 void CheckButtons()
@@ -589,3 +586,61 @@ void ShowDisplayOff()
     displayActive = false;
   }
 }
+
+// ------------------------------------------------------------------
+// Non-blocking status LED pattern
+//  States / patterns:
+//   - AP mode: fast blink (100ms on / 100ms off)
+//   - Connected STA: slow heartbeat (on 60ms every 2s)
+//   - Connecting / disconnected: double blink (2 quick pulses every 1s)
+// ------------------------------------------------------------------
+void updateStatusLED() {
+    static unsigned long lastChange = 0;
+    static uint8_t phase = 0;
+    unsigned long now = millis();
+
+    bool apMode = WiFi.getMode() == WIFI_AP;
+    bool connected = !apMode && WiFi.status() == WL_CONNECTED;
+
+    if (apMode) {
+        // simple fast blink 5Hz (100/100)
+        if (now - lastChange >= 100) {
+            lastChange = now;
+            digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+        }
+        return;
+    }
+
+    if (connected) {
+        // heartbeat: brief flash every 2s
+        switch (phase) {
+            case 0: // LED off idle
+                if (now - lastChange >= 2000) { phase = 1; lastChange = now; digitalWrite(LED_BUILTIN, HIGH); }
+                break;
+            case 1: // LED on briefly
+                if (now - lastChange >= 60) { phase = 0; lastChange = now; digitalWrite(LED_BUILTIN, LOW); }
+                break;
+        }
+        return;
+    }
+
+    // disconnected / connecting: double blink every ~1s
+    switch (phase) {
+        case 0: // idle off
+            if (now - lastChange >= 1000) { phase = 1; lastChange = now; digitalWrite(LED_BUILTIN, HIGH); }
+            break;
+        case 1: // first on
+            if (now - lastChange >= 80) { phase = 2; lastChange = now; digitalWrite(LED_BUILTIN, LOW); }
+            break;
+        case 2: // gap
+            if (now - lastChange >= 120) { phase = 3; lastChange = now; digitalWrite(LED_BUILTIN, HIGH); }
+            break;
+        case 3: // second on
+            if (now - lastChange >= 80) { phase = 4; lastChange = now; digitalWrite(LED_BUILTIN, LOW); }
+            break;
+        case 4: // tail gap back to idle
+            if (now - lastChange >= 200) { phase = 0; lastChange = now; }
+            break;
+    }
+}
+
