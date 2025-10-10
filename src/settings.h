@@ -151,7 +151,6 @@ struct BoilerSettings {
             .prettyName = "Failsafe Boiler On under",
             .prettyCat = "Boiler Control",
             .showInWeb = true,
-            .showIf = [this](){return this->enabled.get();}
         }),
         offThreshold(ConfigOptions<float>{
             .keyName = "BoilerOff",
@@ -160,7 +159,6 @@ struct BoilerSettings {
             .prettyName = "Failsafe Boiler Off Over",
             .prettyCat = "Boiler Control",
             .showInWeb = true,
-            .showIf = [this](){return this->enabled.get();}
         }),
         relayPin(ConfigOptions<int>{
             .keyName = "RlfPin",
@@ -179,11 +177,10 @@ struct BoilerSettings {
         boilerTimeMin(ConfigOptions<int>{
             .keyName = "BoilerTime",
             .category = "Boiler",
-            .defaultValue = 30,
+            .defaultValue = 90,
             .prettyName = "Boiler Max Heating Time (min)",
             .prettyCat = "Boiler Control",
-            .showInWeb = true,
-            .showIf = [this](){return this->enabled.get();}
+            .showInWeb = true
         })
     {
         cfg.addSetting(&enabled);
@@ -192,6 +189,7 @@ struct BoilerSettings {
         cfg.addSetting(&relayPin);
         cfg.addSetting(&activeLow);
         cfg.addSetting(&boilerTimeMin);
+        
     }
 };
 

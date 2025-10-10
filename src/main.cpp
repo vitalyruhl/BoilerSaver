@@ -16,6 +16,7 @@ AsyncWebServer server(80);
 // predeclare the functions (prototypes)
 void SetupStartDisplay();
 void reconnectMQTT();
+void handleMqttReconnection(); // Non-blocking MQTT reconnection handler
 void cb_MQTT(char *topic, byte *message, unsigned int length);
 void publishToMQTT();
 void cb_PublishToMQTT();
@@ -60,6 +61,22 @@ bool displayActive = true;   // flag to indicate if the display is active
 static unsigned long wifiLastGoodMillis = 0;     // last time WiFi was connected (and not AP)
 static bool wifiAutoRebootArmed = false;         // becomes true after initial setup completion
 
+// Non-blocking MQTT reconnection state management
+enum MqttReconnectState {
+  MQTT_STATE_IDLE,
+  MQTT_STATE_CONNECTING,
+  MQTT_STATE_WAIT_RESULT,
+  MQTT_STATE_CONNECTED,
+  MQTT_STATE_FAILED
+};
+
+static MqttReconnectState mqttState = MQTT_STATE_IDLE;
+static unsigned long mqttLastAttempt = 0;
+static int mqttRetryCount = 0;
+static const int mqttMaxRetries = 10;
+static const unsigned long mqttRetryInterval = 5000; // 5 seconds between attempts
+static const unsigned long mqttConnectTimeout = 10000; // 10 seconds to wait for connection
+
 #pragma endregion configuration variables
 
 //----------------------------------------
@@ -88,12 +105,13 @@ void setup()
 
   sl->Printf("Load configuration...").Debug();
   cfg.loadAll();
+  
+  cfg.checkSettingsForErrors();
   // Re-apply relay pin modes with loaded settings (pins/polarity may differ from defaults)
   Relays::initPins();
-
-  cfg.checkSettingsForErrors();
+  
   mqttSettings.updateTopics();
-
+  
   // init modules...
   sl->Printf("init modules...").Debug();
   SetupStartDisplay();
@@ -224,7 +242,7 @@ void loop()
       ListenMQTTTicker.attach(mqttSettings.MQTTListenPeriod.get(), cb_MQTTListener);      // Reattach the ticker if WiFi is connected
       if(systemSettings.allowOTA.get()){
           sll->Debug("Start OTA-Module");
-          cfg.setupOTA("Ota-esp32-device", systemSettings.otaPassword.get().c_str());
+          cfg.setupOTA(APP_NAME, systemSettings.otaPassword.get().c_str());
       }
       ShowDisplay();               // Show the display
       tickerActive = true; // Set the flag to indicate that the ticker is active
@@ -264,12 +282,10 @@ void loop()
           cfg.handleRuntimeAlarms();
       }
 
-  if (!client.connected())
-  {
-    sll->Debug("MQTT Not Connected! -> reconnecting...");
-    reconnectMQTT();
-  }
+  // Handle non-blocking MQTT reconnection
+  handleMqttReconnection();
 
+    updateStatusLED();
     cfg.handleClient();
     cfg.handleWebsocketPush();
     cfg.handleOTA();
@@ -280,84 +296,118 @@ void loop()
 //----------------------------------------
 // MQTT FUNCTIONS
 //----------------------------------------
-void reconnectMQTT()
-{
-  IPAddress mqttIP;
-  if (mqttIP.fromString(mqttSettings.mqtt_server.get()))
-  {
-    client.setServer(mqttIP, static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
-  }
-  else
-  {
-    sl->Printf("Invalid MQTT IP: %s", mqttSettings.mqtt_server.get().c_str()).Error();
-  }
 
-  if (WiFi.status() != WL_CONNECTED || WiFi.getMode() == WIFI_AP)
-  {
-    // sl->Debug("WiFi not connected or in AP mode! Skipping mqttSettings.");
+void handleMqttReconnection()
+{
+  // Only handle MQTT when WiFi is connected and not in AP mode
+  if (WiFi.status() != WL_CONNECTED || WiFi.getMode() == WIFI_AP) {
+    mqttState = MQTT_STATE_IDLE;
     return;
   }
 
-  int retry = 0;
-  int maxRetry = 10; // max retry count
+  unsigned long now = millis();
 
-  while (!client.connected() && retry < maxRetry) // Retry 5 times before restarting
-  {
-    // sl->Printf("MQTT reconnect attempt %d...", retry + 1).Log(level);
+  switch (mqttState) {
+    case MQTT_STATE_IDLE:
+      // Check if MQTT is connected
+      if (client.connected()) {
+        mqttState = MQTT_STATE_CONNECTED;
+        mqttRetryCount = 0; // Reset retry counter on successful connection
+      } else {
+        // Start reconnection process
+        mqttState = MQTT_STATE_CONNECTING;
+        mqttLastAttempt = now;
+        sl->Printf("MQTT disconnected. Starting reconnection attempt %d/%d", 
+                   mqttRetryCount + 1, mqttMaxRetries).Debug();
+        sll->Debug("MQTT reconnecting...");
+      }
+      break;
 
-    sl->Printf("Attempting MQTT connection to %s:%d...",
-               mqttSettings.mqtt_server.get().c_str(),
-               mqttSettings.mqtt_port.get())
-        .Debug();
+    case MQTT_STATE_CONNECTING:
+      // Only attempt connection once per state entry
+      if (now - mqttLastAttempt >= 100) { // Small delay to prevent immediate retry
+        // Set server configuration
+        IPAddress mqttIP;
+        if (mqttIP.fromString(mqttSettings.mqtt_server.get())) {
+          client.setServer(mqttIP, static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
+        } else {
+          client.setServer(mqttSettings.mqtt_server.get().c_str(), 
+                          static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
+        }
 
-    // helpers.blinkBuidInLED(5, 300);
-    retry++;
+        sl->Printf("Attempting MQTT connection to %s:%d (attempt %d/%d)", 
+                   mqttSettings.mqtt_server.get().c_str(),
+                   mqttSettings.mqtt_port.get(),
+                   mqttRetryCount + 1, mqttMaxRetries).Debug();
 
-    // print the mqtt settings
-    sl->Printf("Connecting to MQTT broker...").Debug();
-    sl->Printf("MQTT Hostname: %s", mqttSettings.Publish_Topic.get().c_str()).Debug();
-    sl->Printf("MQTT Server: %s", mqttSettings.mqtt_server.get().c_str()).Debug();
-    sl->Printf("MQTT Port: %d", mqttSettings.mqtt_port.get()).Debug();
-    sl->Printf("MQTT User: %s", mqttSettings.mqtt_username.get().c_str()).Debug();
-    sl->Printf("MQTT Password: ***").Debug();
+        // Attempt non-blocking connection
+        bool connected = client.connect(
+          mqttSettings.Publish_Topic.get().c_str(),
+          mqttSettings.mqtt_username.get().c_str(),
+          mqttSettings.mqtt_password.get().c_str()
+        );
 
-    client.connect(mqttSettings.Publish_Topic.get().c_str(), mqttSettings.mqtt_username.get().c_str(), mqttSettings.mqtt_password.get().c_str()); // Connect to the MQTT broker
-    delay(2000);
+        mqttState = MQTT_STATE_WAIT_RESULT;
+        mqttLastAttempt = now;
+      }
+      break;
 
-    if (client.connected())
-    {
-      sl->Debug("Connected!");
-    }
-    else
-    {
-      sl->Printf("Failed, rc=%d", client.state()).Error();
-    }
+    case MQTT_STATE_WAIT_RESULT:
+      // Check connection result
+      if (client.connected()) {
+        sl->Debug("MQTT connected successfully!");
+        sll->Debug("MQTT connected!");
+        mqttState = MQTT_STATE_CONNECTED;
+        mqttRetryCount = 0;
+        
+        // Subscribe to topics here if needed
+        sl->Debug("Ready to subscribe to MQTT topics...");
+        
+      } else if (now - mqttLastAttempt > mqttConnectTimeout) {
+        // Connection attempt timed out
+        mqttRetryCount++;
+        sl->Printf("MQTT connection timeout (rc=%d). Retry %d/%d", 
+                   client.state(), mqttRetryCount, mqttMaxRetries).Error();
+        
+        client.disconnect(); // Clean disconnect
+        
+        if (mqttRetryCount >= mqttMaxRetries) {
+          mqttState = MQTT_STATE_FAILED;
+          sl->Printf("MQTT reconnection failed after %d attempts", mqttMaxRetries).Error();
+          sll->Error("MQTT reconnection failed!");
+        } else {
+          mqttState = MQTT_STATE_IDLE;
+          mqttLastAttempt = now; // Reset timer for next attempt
+        }
+      }
+      break;
 
-    if (client.connected())
-      break; // Exit the loop if connected successfully
+    case MQTT_STATE_CONNECTED:
+      // Continuously check if still connected
+      if (!client.connected()) {
+        sl->Debug("MQTT connection lost");
+        sll->Debug("MQTT connection lost");
+        mqttState = MQTT_STATE_IDLE;
+      }
+      break;
 
-    // disconnect from MQTT broker if not connected
-    client.disconnect();
-    delay(500);
-    esp_task_wdt_reset(); // Reset watchdog to prevent reboot
+    case MQTT_STATE_FAILED:
+      // Wait before trying again (much longer interval after total failure)
+      if (now - mqttLastAttempt > 30000) { // Wait 30 seconds after failure
+        sl->Debug("Retrying MQTT after failure timeout");
+        mqttRetryCount = 0;
+        mqttState = MQTT_STATE_IDLE;
+      }
+      break;
   }
+}
 
-  if (retry >= maxRetry)
-  {
-    sl->Printf("MQTT reconnect failed after %d attempts. go to next loop...", maxRetry);
-
-    return; // exit the function if max retry reached
-  }
-
-  else
-  {
-    sl->Debug("MQTT connected!");
-    // cb_PublishToMQTT(); // publish the settings to the MQTT broker, before subscribing to the topics
-    sl->Debug("trying to subscribe to topics...");
-    sll->Debug("subscribe to mqtt...");
-
-    //ToDO: subscribe to topics
-  }
+// Legacy function kept for compatibility - now non-blocking
+void reconnectMQTT()
+{
+  // Reset state to trigger reconnection
+  mqttState = MQTT_STATE_IDLE;
+  mqttRetryCount = 0;
 }
 
 void publishToMQTT()
