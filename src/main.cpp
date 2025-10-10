@@ -352,7 +352,7 @@ void reconnectMQTT()
   else
   {
     sl->Debug("MQTT connected!");
-    cb_PublishToMQTT(); // publish the settings to the MQTT broker, before subscribing to the topics
+    // cb_PublishToMQTT(); // publish the settings to the MQTT broker, before subscribing to the topics
     sl->Debug("trying to subscribe to topics...");
     sll->Debug("subscribe to mqtt...");
 
