@@ -70,13 +70,20 @@ enum MqttReconnectState {
   MQTT_STATE_FAILED
 };
 
+
+//non blocking MQTT reconnection variables
 static MqttReconnectState mqttState = MQTT_STATE_IDLE;
 static unsigned long mqttLastAttempt = 0;
 static int mqttRetryCount = 0;
 static const int mqttMaxRetries = 10;
 static const unsigned long mqttRetryInterval = 5000; // 5 seconds between attempts
 static const unsigned long mqttConnectTimeout = 10000; // 10 seconds to wait for connection
-
+// Non-blocking WiFi reconnection state management
+static unsigned long lastWifiReconnectAttempt = 0;
+static const unsigned long wifiReconnectInterval = 10000; // 10 seconds between attempts
+// Non-blocking display update management
+static unsigned long lastDisplayUpdate = 0;
+static const unsigned long displayUpdateInterval = 100; // Update display every 100ms
 #pragma endregion configuration variables
 
 //----------------------------------------
@@ -177,61 +184,12 @@ void setup()
 
 void loop()
 {
+
+  
   CheckButtons();
   boilerState = Relays::getBoiler();
-  if (WiFi.status() == WL_CONNECTED && client.connected())
-  {
-    digitalWrite(LED_BUILTIN, LOW); // show that we are connected
-  }
-  else
-  {
-    digitalWrite(LED_BUILTIN, HIGH); // disconnected
-  }
 
-  if (WiFi.status() != WL_CONNECTED || WiFi.getMode() == WIFI_AP)
-  {
-    if (tickerActive) // Check if the ticker is already active
-    {
-      ShowDisplay(); // Show the display to indicate WiFi is lost
-      sl->Debug("WiFi not connected or in AP mode! deactivate ticker.");
-      sll->Debug("WiFi lost connection!");
-      sll->Debug("or run in AP mode!");
-      sll->Debug("deactivate mqtt ticker.");
-      PublischMQTTTicker.detach(); // Stop the ticker if WiFi is not connected or in AP mode
-      ListenMQTTTicker.detach();   // Stop the ticker if WiFi is not connected or in AP mode
-      tickerActive = false;        // Set the flag to indicate that the ticker is not active
-
-      // check if ota is active and settings is off, reboot device, to stop ota
-  if (systemSettings.allowOTA.get() == false && cfg.isOTAInitialized())
-      {
-        sll->Debug("Stop OTA-Modeule");
-        cfg.stopOTA();
-      }
-    }
-    //reconnect, if not in ap mode
-    if (WiFi.getMode() != WIFI_AP){
-      sl->Debug("reconnect to WiFi...");
-      sll->Debug("reconnect to WiFi...");
-      // WiFi.reconnect(); // try to reconnect to WiFi
-      bool isStartedAsAP = SetupStartWebServer();
-    }
-    // Auto reboot logic: only if not AP mode, feature enabled and timeout exceeded
-    if (wifiAutoRebootArmed && WiFi.getMode() != WIFI_AP){
-        int timeoutMin = systemSettings.wifiRebootTimeoutMin.get();
-        if(timeoutMin > 0){
-            unsigned long now = millis();
-            unsigned long elapsedMs = now - wifiLastGoodMillis;
-            unsigned long thresholdMs = (unsigned long)timeoutMin * 60000UL;
-            if(elapsedMs > thresholdMs){
-                sl->Printf("[WiFi] Lost for > %d min -> reboot", timeoutMin).Error();
-                sll->Printf("WiFi lost -> reboot").Error();
-                delay(200);
-                ESP.restart();
-            }
-        }
-    }
-  }
-  else
+  if (WiFi.status() == WL_CONNECTED && WiFi.getMode() != WIFI_AP)
   {
     if (!tickerActive) // Check if the ticker is not already active
     {
@@ -245,53 +203,90 @@ void loop()
           sll->Debug("Start OTA-Module");
           cfg.setupOTA(APP_NAME, systemSettings.otaPassword.get().c_str());
       }
-      ShowDisplay();               // Show the display
       tickerActive = true; // Set the flag to indicate that the ticker is active
     }
     // Update last good WiFi timestamp when connected (station mode only)
-    if(WiFi.status() == WL_CONNECTED && WiFi.getMode() != WIFI_AP){
-        wifiLastGoodMillis = millis();
+    wifiLastGoodMillis = millis();
+  }
+  else
+  {
+    if (tickerActive) // Check if the ticker is already active
+    {
+      ShowDisplay(); // Show the display to indicate WiFi is lost
+      sl->Debug("WiFi not connected or in AP mode! deactivate ticker.");
+      sll->Debug("WiFi lost connection!");
+      sll->Debug("or run in AP mode!");
+      sll->Debug("deactivate mqtt ticker.");
+      PublischMQTTTicker.detach(); // Stop the ticker if WiFi is not connected or in AP mode
+      ListenMQTTTicker.detach();   // Stop the ticker if WiFi is not connected or in AP mode
+      tickerActive = false;        // Set the flag to indicate that the ticker is not active
+
+      // check if ota is active and settings is off, reboot device, to stop ota
+      if (systemSettings.allowOTA.get() == false && cfg.isOTAInitialized())
+      {
+        sll->Debug("Stop OTA-Module");
+        cfg.stopOTA();
+      }
+    }
+    
+    // Non-blocking WiFi reconnection (only if not in AP mode)
+    if (WiFi.getMode() != WIFI_AP) {
+      unsigned long now = millis();
+      if (now - lastWifiReconnectAttempt > wifiReconnectInterval) {
+        lastWifiReconnectAttempt = now;
+        sl->Debug("Attempting WiFi reconnection...");
+        sll->Debug("reconnect to WiFi...");
+        WiFi.reconnect(); // Non-blocking reconnect attempt
+      }
+    }
+    
+    // Auto reboot logic: only if not AP mode, feature enabled and timeout exceeded
+    if (wifiAutoRebootArmed && WiFi.getMode() != WIFI_AP){
+        int timeoutMin = systemSettings.wifiRebootTimeoutMin.get();
+        if(timeoutMin > 0){
+            unsigned long now = millis();
+            unsigned long elapsedMs = now - wifiLastGoodMillis;
+            unsigned long thresholdMs = (unsigned long)timeoutMin * 60000UL;
+            if(elapsedMs > thresholdMs){
+                sl->Printf("[WiFi] Lost for > %d min -> reboot", timeoutMin).Error();
+                sll->Printf("WiFi lost -> reboot").Error();
+                ESP.restart();
+            }
+        }
     }
   }
 
-  WriteToDisplay();
+  // Non-blocking display updates
+  if (millis() - lastDisplayUpdate > displayUpdateInterval) {
+    lastDisplayUpdate = millis();
+    WriteToDisplay();
+  }
 
   if (WiFi.getMode() == WIFI_AP) {
-    // helpers.blinkBuidInLED(5, 50); // show we are in AP mode
-    sll->Debug("or run in AP mode!");
-  } else {
-    if (WiFi.status() != WL_CONNECTED) {
-      sl->Debug("❌ WiFi not connected!");
-      sll->Debug("reconnect to WiFi...");
-      // cfg.reconnectWifi();
-      SetupStartWebServer();
-      delay(1000);
-      return;
+    // Show we are in AP mode - non-blocking
+    static unsigned long lastAPMessage = 0;
+    if (millis() - lastAPMessage > 5000) {
+      lastAPMessage = millis();
+      sll->Debug("Running in AP mode!");
     }
-    else {
-      // refresh last good timestamp here as safeguard
-      wifiLastGoodMillis = millis();
-    }
-    // blinkBuidInLED(1, 100); // not used here, because blinker is used if we get a message from MQTT
   }
 
   // Evaluate cross-field runtime alarms periodically (cheap doc build ~ small JSON)
   static unsigned long lastAlarmEval = 0;
-      if (millis() - lastAlarmEval > 1500)
-      {
-          lastAlarmEval = millis();
-          cfg.handleRuntimeAlarms();
-      }
+  if (millis() - lastAlarmEval > 1500)
+  {
+      lastAlarmEval = millis();
+      cfg.handleRuntimeAlarms();
+  }
 
   // Handle non-blocking MQTT reconnection
   handleMqttReconnection();
 
-    updateStatusLED();
-    cfg.handleClient();
-    cfg.handleWebsocketPush();
-    cfg.handleOTA();
-    cfg.updateLoopTiming(); // Update internal loop timing metrics for system provider
-
+  updateStatusLED();
+  cfg.handleClient();
+  cfg.handleWebsocketPush();
+  cfg.handleOTA();
+  cfg.updateLoopTiming(); // Update internal loop timing metrics for system provider
 }
 
 //----------------------------------------
@@ -470,18 +465,18 @@ void cb_MQTTListener()
 
 void SetupCheckForResetButton()
 {
-
   // check for pressed reset button
-
   if (digitalRead(buttonSettings.resetDefaultsPin.get()) == LOW)
   {
-  sl->Internal("Reset button pressed -> Reset all settings...");
-  sll->Internal("Reset button pressed!");
-  sll->Internal("Reset all settings!");
+    sl->Internal("Reset button pressed -> Reset all settings...");
+    sll->Internal("Reset button pressed!");
+    sll->Internal("Reset all settings!");
     cfg.clearAllFromPrefs(); // Clear all settings from EEPROM
-    delay(10000);            // Wait for 10 seconds to avoid multiple resets
     cfg.saveAll();           // Save the default settings to EEPROM
-    delay(10000);            // Wait for 10 seconds to avoid multiple resets
+    
+    // Show user feedback that reset is happening
+    sll->Internal("Settings reset complete - restarting...");
+    
     ESP.restart();           // Restart the ESP32
   }
 }
@@ -520,7 +515,7 @@ bool SetupStartWebServer()
     sll->Printf("No SSID!").Debug();
     sll->Printf("Start AP!").Debug();
     cfg.startAccessPoint();
-    delay(1000);
+    // Removed blocking delay(1000);
     return true; // Skip webserver setup if no SSID is set
   }
 
@@ -544,7 +539,7 @@ bool SetupStartWebServer()
     }
     // cfg.reconnectWifi();
     WiFi.setSleep(false);
-    delay(1000);
+    // Removed blocking delay(1000);
   }
   sl->Printf("\n\nWebserver running at: %s\n", WiFi.localIP().toString().c_str());
   sll->Printf("Web: %s\n\n", WiFi.localIP().toString().c_str());
@@ -557,38 +552,61 @@ bool SetupStartWebServer()
 
 void WriteToDisplay()
 {
-  // display.clearDisplay();
-  display.fillRect(0, 0, 128, 24, BLACK); // Clear the previous message area
-
+  // Static variables to track last displayed values
+  static float lastTemperature = -999.0;
+  static int lastTimeRemaining = -1;
+  static bool lastBoilerState = false;
+  static bool lastDisplayActive = true;
+  
   if (displayActive == false)
   {
+    // If display was just turned off, clear it once
+    if (lastDisplayActive == true) {
+      display.clearDisplay();
+      display.display();
+      lastDisplayActive = false;
+    }
     return; // exit the function if the display is not active
   }
+  
+  lastDisplayActive = true;
+  
+  // Only update display if values have changed
+  bool needsUpdate = false;
+  if (abs(temperature - lastTemperature) > 0.1 || 
+      boilerTimeRemaining != lastTimeRemaining || 
+      boilerState != lastBoilerState) {
+    needsUpdate = true;
+    lastTemperature = temperature;
+    lastTimeRemaining = boilerTimeRemaining;
+    lastBoilerState = boilerState;
+  }
+  
+  if (!needsUpdate) {
+    return; // No changes, skip display update
+  }
 
+  display.fillRect(0, 0, 128, 24, BLACK); // Clear the previous message area
   display.drawRect(0, 0, 128, 24, WHITE);
 
   display.setTextSize(1);
   display.setTextColor(WHITE);
 
-  // display.setCursor(3, 3);
-  // if (temperature > 0)
-  // {
-  //   display.printf("<- %d W|Temp: %2.1f", AktualImportFromGrid, temperature);
-  // }
-  // else
-  // {
-  //   display.printf("<- %d W", AktualImportFromGrid);
-  // }
+  // Show boiler status and temperature
+  display.setCursor(3, 3);
+  if (temperature > 0) {
+    display.printf("Boiler: %s | T:%.1f°C", boilerState ? "ON " : "OFF", temperature);
+  } else {
+    display.printf("Boiler: %s", boilerState ? "ON " : "OFF");
+  }
 
-  // display.setCursor(3, 13);
-  // if (Dewpoint != 0)
-  // {
-  //   display.printf("-> %d W|DP-T: %2.1f", inverterSetValue, Dewpoint);
-  // }
-  // else
-  // {
-  //   display.printf("-> %d W", inverterSetValue);
-  // }
+  // Show remaining time
+  display.setCursor(3, 13);
+  if (boilerTimeRemaining > 0) {
+    display.printf("Time left: %d min", boilerTimeRemaining);
+  } else {
+    display.printf("Ready");
+  }
 
   display.display();
 }
@@ -605,18 +623,34 @@ void PinSetup()
 
 void CheckButtons()
 {
-  // sl->Debug("Check Buttons...");
-  if (digitalRead(buttonSettings.resetDefaultsPin.get()) == LOW)
+  static bool lastResetButtonState = HIGH;
+  static bool lastAPButtonState = HIGH;
+  static unsigned long lastButtonCheck = 0;
+  
+  // Debounce: only check buttons every 50ms
+  if (millis() - lastButtonCheck < 50) {
+    return;
+  }
+  lastButtonCheck = millis();
+  
+  bool currentResetState = digitalRead(buttonSettings.resetDefaultsPin.get());
+  bool currentAPState = digitalRead(buttonSettings.apModePin.get());
+  
+  // Check for button press (transition from HIGH to LOW)
+  if (lastResetButtonState == HIGH && currentResetState == LOW)
   {
-    sl->Internal("Reset-Button pressed after reboot... -> Start Display Ticker...");
+    sl->Internal("Reset-Button pressed -> Start Display Ticker...");
     ShowDisplay();
   }
 
-  if (digitalRead(buttonSettings.apModePin.get()) == LOW)
+  if (lastAPButtonState == HIGH && currentAPState == LOW)
   {
-    sl->Internal("AP-Mode-Button pressed after reboot... -> Start Display Ticker...");
+    sl->Internal("AP-Mode-Button pressed -> Start Display Ticker...");
     ShowDisplay();
   }
+  
+  lastResetButtonState = currentResetState;
+  lastAPButtonState = currentAPState;
 }
 
 void ShowDisplay()
