@@ -59,7 +59,9 @@ struct MQTT_Settings
     Config<String> mqtt_password;
     Config<String> Publish_Topic;
     Config<String> mqtt_Settings_ShowerTime_topic;
-    Config<String> mqtt_Settings_SetShowerTime_topic;
+    Config<String> mqtt_Settings_SetState_topic;
+    Config<bool> mqtt_Settings_SetState; // payload to turn boiler on
+    Config<int>mqtt_Settings_ShowerTime;
     Config<float> MQTTPublischPeriod;
     Config<float> MQTTListenPeriod;
 
@@ -76,9 +78,11 @@ struct MQTT_Settings
                       mqtt_password(ConfigOptions<String>{.keyName = "Pass", .category = "MQTT", .defaultValue = String("mqttsecret"), .prettyName = "Password", .showInWeb = true, .isPassword = true}),
                       Publish_Topic(ConfigOptions<String>{.keyName = "MQTTT", .category = "MQTT", .defaultValue = String("BoilerSaver"), .prettyName = "Publish-Topic", }),
                       mqtt_Settings_ShowerTime_topic(ConfigOptions<String>{.keyName = "ShowerT", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/ShowerTime"), .prettyName = "Shower-Time Topic", .showInWeb = true, .isPassword = false}),
-                      mqtt_Settings_SetShowerTime_topic(ConfigOptions<String>{.keyName = "SetShower", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/SetShowerTime"), .prettyName = "Set-Shower-Time Topic", .showInWeb = true, .isPassword = false}),
+                      mqtt_Settings_SetState_topic(ConfigOptions<String>{.keyName = "SetShower", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/SetShowerTime"), .prettyName = "Set-Shower-Time Topic", .showInWeb = true, .isPassword = false}),
                       MQTTPublischPeriod(ConfigOptions<float>{.keyName = "PubPeriod", .category = "MQTT", .defaultValue = 2.0f, .prettyName = "Publish-Period (s)", }),
-                      MQTTListenPeriod(ConfigOptions<float>{.keyName = "ListenPeriod", .category = "MQTT", .defaultValue = 0.5f, .prettyName = "Listen-Period (s)", })
+                      MQTTListenPeriod(ConfigOptions<float>{.keyName = "ListenPeriod", .category = "MQTT", .defaultValue = 0.5f, .prettyName = "Listen-Period (s)", }),
+                      mqtt_Settings_SetState(ConfigOptions<bool>{.keyName = "SetStateOn", .category = "MQTT", .defaultValue = false, .prettyName = "Set-State", .showInWeb = false, .isPassword = false}),
+                      mqtt_Settings_ShowerTime(ConfigOptions<int>{.keyName = "ShowerTime", .category = "MQTT", .defaultValue = 90, .prettyName = "Shower Time (min)", .showInWeb = false, .isPassword = false})
 
     {
         cfg.addSetting(&mqtt_port);
@@ -87,9 +91,11 @@ struct MQTT_Settings
         cfg.addSetting(&mqtt_password);
         cfg.addSetting(&Publish_Topic);
         cfg.addSetting(&mqtt_Settings_ShowerTime_topic);
-        cfg.addSetting(&mqtt_Settings_SetShowerTime_topic);
+        cfg.addSetting(&mqtt_Settings_SetState_topic);
         cfg.addSetting(&MQTTPublischPeriod);
         cfg.addSetting(&MQTTListenPeriod);
+        cfg.addSetting(&mqtt_Settings_SetState);
+        cfg.addSetting(&mqtt_Settings_ShowerTime);
 
         // Callback to update topics when Publish_Topic changes
         Publish_Topic.setCallback([this](String newValue){ this->updateTopics(); });

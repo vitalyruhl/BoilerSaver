@@ -52,7 +52,7 @@ PubSubClient client(espClient);
 // globale helpers variables
 float temperature = 0.0;      // current temperature in Celsius
 int boilerTimeRemaining = 0; // remaining time for boiler in minutes
-bool heaterState = false;    // current state of the heater (on/off)
+bool boilerState = false;    // current state of the heater (on/off)
 
 bool tickerActive = false;    // flag to indicate if the ticker is active
 bool displayActive = true;   // flag to indicate if the display is active
@@ -93,7 +93,7 @@ void setup()
   cfg.setAppName(APP_NAME); // Set an application name, used for SSID in AP mode and as a prefix for the hostname
   cfg.setCustomCss(GLOBAL_THEME_OVERRIDE, sizeof(GLOBAL_THEME_OVERRIDE) - 1);// Register global CSS override
   cfg.enableBuiltinSystemProvider(); // enable the builtin system provider (uptime, freeHeap, rssi etc.)
- 
+
 
   PinSetup();
   sl->Printf("Check for reset/AP button...").Debug();
@@ -105,13 +105,13 @@ void setup()
 
   sl->Printf("Load configuration...").Debug();
   cfg.loadAll();
-  
+
   cfg.checkSettingsForErrors();
   // Re-apply relay pin modes with loaded settings (pins/polarity may differ from defaults)
   Relays::initPins();
-  
+
   mqttSettings.updateTopics();
-  
+
   // init modules...
   sl->Printf("init modules...").Debug();
   SetupStartDisplay();
@@ -169,7 +169,7 @@ void setup()
   static bool stateBtnState = false;
   cfg.defineRuntimeStateButton("Hand overrides", "sb_mode", "Will Duschen", [](){ return stateBtnState; }, [](bool v){
     stateBtnState = v;  Relays::setBoiler(v);}, /*init*/ false, 91);
-  
+
 
 
   //---------------------------------------------------------------------------------------------------
@@ -178,6 +178,7 @@ void setup()
 void loop()
 {
   CheckButtons();
+  boilerState = Relays::getBoiler();
   if (WiFi.status() == WL_CONNECTED && client.connected())
   {
     digitalWrite(LED_BUILTIN, LOW); // show that we are connected
@@ -317,7 +318,7 @@ void handleMqttReconnection()
         // Start reconnection process
         mqttState = MQTT_STATE_CONNECTING;
         mqttLastAttempt = now;
-        sl->Printf("MQTT disconnected. Starting reconnection attempt %d/%d", 
+        sl->Printf("MQTT disconnected. Starting reconnection attempt %d/%d",
                    mqttRetryCount + 1, mqttMaxRetries).Debug();
         sll->Debug("MQTT reconnecting...");
       }
@@ -331,11 +332,11 @@ void handleMqttReconnection()
         if (mqttIP.fromString(mqttSettings.mqtt_server.get())) {
           client.setServer(mqttIP, static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
         } else {
-          client.setServer(mqttSettings.mqtt_server.get().c_str(), 
+          client.setServer(mqttSettings.mqtt_server.get().c_str(),
                           static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
         }
 
-        sl->Printf("Attempting MQTT connection to %s:%d (attempt %d/%d)", 
+        sl->Printf("Attempting MQTT connection to %s:%d (attempt %d/%d)",
                    mqttSettings.mqtt_server.get().c_str(),
                    mqttSettings.mqtt_port.get(),
                    mqttRetryCount + 1, mqttMaxRetries).Debug();
@@ -359,18 +360,23 @@ void handleMqttReconnection()
         sll->Debug("MQTT connected!");
         mqttState = MQTT_STATE_CONNECTED;
         mqttRetryCount = 0;
-        
+
         // Subscribe to topics here if needed
         sl->Debug("Ready to subscribe to MQTT topics...");
-        
+
+        //propagate initial boiler Settings to MQTT on startup
+        sl->Debug("Propagate initial boiler settings to MQTT...");
+        client.publish(mqttSettings.mqtt_Settings_SetState_topic.get().c_str(), String(mqttSettings.mqtt_Settings_SetState.get()).c_str());
+        client.publish(mqttSettings.mqtt_Settings_ShowerTime_topic.get().c_str(), String(mqttSettings.mqtt_Settings_ShowerTime.get()).c_str());
+
       } else if (now - mqttLastAttempt > mqttConnectTimeout) {
         // Connection attempt timed out
         mqttRetryCount++;
-        sl->Printf("MQTT connection timeout (rc=%d). Retry %d/%d", 
+        sl->Printf("MQTT connection timeout (rc=%d). Retry %d/%d",
                    client.state(), mqttRetryCount, mqttMaxRetries).Error();
-        
+
         client.disconnect(); // Clean disconnect
-        
+
         if (mqttRetryCount >= mqttMaxRetries) {
           mqttState = MQTT_STATE_FAILED;
           sl->Printf("MQTT reconnection failed after %d attempts", mqttMaxRetries).Error();
@@ -402,7 +408,6 @@ void handleMqttReconnection()
   }
 }
 
-// Legacy function kept for compatibility - now non-blocking
 void reconnectMQTT()
 {
   // Reset state to trigger reconnection
@@ -416,17 +421,13 @@ void publishToMQTT()
   {
     sl->Debug("publishToMQTT: Publishing to MQTT...");
     sll->Debug("Publishing to MQTT...");
-    //ToDo: publish the values to the topics
-    // sl->Printf("--> MQTT: Topic[%s] -> [%d]", mqttSettings.mqtt_publish_setvalue_topic.c_str(), inverterSetValue).Debug();
-    // client.publish(mqttSettings.mqtt_publish_setvalue_topic.c_str(), String(inverterSetValue).c_str());
-    // client.publish(mqttSettings.mqtt_publish_getvalue_topic.c_str(), String(AktualImportFromGrid).c_str());
-    // client.publish(mqttSettings.mqtt_publish_Temperature_topic.c_str(), String(temperature).c_str());
-    // client.publish(mqttSettings.mqtt_publish_Humidity_topic.c_str(), String(Humidity).c_str());
-    // client.publish(mqttSettings.mqtt_publish_Dewpoint_topic.c_str(), String(Dewpoint).c_str());
+    client.publish(mqttSettings.mqtt_publish_AktualBoilerTemperature.c_str(), String(temperature).c_str());
+    client.publish(mqttSettings.mqtt_publish_AktualTimeRemaining_topic.c_str(), String(boilerTimeRemaining).c_str());
+    client.publish(mqttSettings.mqtt_publish_AktualState.c_str(), String(boilerState).c_str());
   }
   else
   {
-    sl->Debug("publishToMQTT: MQTT not connected!");
+    sl->Warn("publishToMQTT: MQTT not connected!");
   }
 }
 
@@ -437,7 +438,7 @@ void cb_MQTT(char *topic, byte *message, unsigned int length)
 
   sl->Printf("<-- MQTT: Topic[%s] <-- [%s]", topic, messageTemp.c_str()).Debug();
   //ToDO: set new Blinker for: helpers.blinkBuidInLED(1, 100); // blink the LED once to indicate that the loop is running
-  if (strcmp(topic, mqttSettings.mqtt_Settings_SetShowerTime_topic.get().c_str()) == 0)
+  if (strcmp(topic, mqttSettings.mqtt_Settings_SetState_topic.get().c_str()) == 0)
   {
     // check if it is a number, if not set it to 0
     if (messageTemp.equalsIgnoreCase("null") ||
@@ -453,10 +454,6 @@ void cb_MQTT(char *topic, byte *message, unsigned int length)
   }
 }
 
-//----------------------------------------
-// HELPER FUNCTIONS
-//----------------------------------------
-
 void cb_PublishToMQTT()
 {
   publishToMQTT(); // send to Mqtt
@@ -466,6 +463,10 @@ void cb_MQTTListener()
 {
   client.loop(); // process incoming MQTT messages
 }
+
+//----------------------------------------
+// HELPER FUNCTIONS
+//----------------------------------------
 
 void SetupCheckForResetButton()
 {
