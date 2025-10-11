@@ -79,10 +79,10 @@ struct MQTT_Settings
                       Publish_Topic(ConfigOptions<String>{.keyName = "MQTTT", .category = "MQTT", .defaultValue = String("BoilerSaver"), .prettyName = "Publish-Topic", }),
                       mqtt_Settings_ShowerTime_topic(ConfigOptions<String>{.keyName = "ShowerT", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/ShowerTime"), .prettyName = "Shower-Time Topic", .showInWeb = true, .isPassword = false}),
                       mqtt_Settings_SetState_topic(ConfigOptions<String>{.keyName = "SetShower", .category = "MQTT", .defaultValue = String("BoilerSaver/Settings/SetShowerTime"), .prettyName = "Set-Shower-Time Topic", .showInWeb = true, .isPassword = false}),
-                      MQTTPublischPeriod(ConfigOptions<float>{.keyName = "PubPeriod", .category = "MQTT", .defaultValue = 2.0f, .prettyName = "Publish-Period (s)", }),
-                      MQTTListenPeriod(ConfigOptions<float>{.keyName = "ListenPeriod", .category = "MQTT", .defaultValue = 0.5f, .prettyName = "Listen-Period (s)", }),
-                      mqtt_Settings_SetState(ConfigOptions<bool>{.keyName = "SetStateOn", .category = "MQTT", .defaultValue = false, .prettyName = "Set-State", .showInWeb = false, .isPassword = false}),
-                      mqtt_Settings_ShowerTime(ConfigOptions<int>{.keyName = "ShowerTime", .category = "MQTT", .defaultValue = 90, .prettyName = "Shower Time (min)", .showInWeb = false, .isPassword = false})
+                      MQTTPublischPeriod(ConfigOptions<float>{.keyName = "PubPrd", .category = "MQTT", .defaultValue = 2.0f, .prettyName = "Publish-Period (s)", }),
+                      MQTTListenPeriod(ConfigOptions<float>{.keyName = "LisPrd", .category = "MQTT", .defaultValue = 0.5f, .prettyName = "Listen-Period (s)", }),
+                      mqtt_Settings_SetState(ConfigOptions<bool>{.keyName = "SetSt", .category = "MQTT", .defaultValue = false, .prettyName = "Set-State", .showInWeb = false, .isPassword = false}),
+                      mqtt_Settings_ShowerTime(ConfigOptions<int>{.keyName = "ShwTm", .category = "MQTT", .defaultValue = 90, .prettyName = "Shower Time (min)", .showInWeb = false, .isPassword = false})
 
     {
         cfg.addSetting(&mqtt_port);
@@ -142,46 +142,49 @@ struct BoilerSettings {
     Config<int>   relayPin;// GPIO for boiler relay
     Config<bool>  activeLow;// relay active low/high
     Config<int>   boilerTimeMin;// max time boiler is allowed to heat
+
     BoilerSettings():
         enabled(ConfigOptions<bool>{
-            .keyName = "BoilerEn",
+            .keyName = "En",
             .category = "Boiler",
             .defaultValue = true,
             .prettyName = "Enable Boiler Control",
             .prettyCat = "Boiler Control"
         }),
         onThreshold(ConfigOptions<float>{
-            .keyName = "BoilerOn",
+            .keyName = "OnT",
             .category = "Boiler",
             .defaultValue = 55.0f,
-            .prettyName = "Failsafe Boiler On under",
+            .prettyName = "Boiler On Threshold",
             .prettyCat = "Boiler Control",
             .showInWeb = true,
+            .isPassword = false
         }),
         offThreshold(ConfigOptions<float>{
-            .keyName = "BoilerOff",
+            .keyName = "OffT",
             .category = "Boiler",
             .defaultValue = 80.0f,
-            .prettyName = "Failsafe Boiler Off Over",
+            .prettyName = "Boiler Off Threshold",
             .prettyCat = "Boiler Control",
             .showInWeb = true,
+            .isPassword = false
         }),
         relayPin(ConfigOptions<int>{
-            .keyName = "RlfPin",
+            .keyName = "Pin",
             .category = "Boiler",
             .defaultValue = 23,
             .prettyName = "Boiler Relay GPIO",
             .prettyCat = "Boiler Control"
         }),
         activeLow(ConfigOptions<bool>{
-            .keyName = "RlfLow",
+            .keyName = "Low",
             .category = "Boiler",
             .defaultValue = true,
             .prettyName = "Boiler Relay LOW-Active",
             .prettyCat = "Boiler Control"
         }),
         boilerTimeMin(ConfigOptions<int>{
-            .keyName = "BoilerTime",
+            .keyName = "Time",
             .category = "Boiler",
             .defaultValue = 90,
             .prettyName = "Boiler Max Heating Time (min)",
@@ -195,7 +198,6 @@ struct BoilerSettings {
         cfg.addSetting(&relayPin);
         cfg.addSetting(&activeLow);
         cfg.addSetting(&boilerTimeMin);
-        
     }
 };
 
@@ -203,8 +205,8 @@ struct DisplaySettings {
     Config<bool> turnDisplayOff;
     Config<int>  onTimeSec;
     DisplaySettings():
-        turnDisplayOff({"DispSave","Display",true,"Turn Display Off","Display Settings"}),
-        onTimeSec({"DispTime","Display",60,"Display On-Time (s)","Display Settings"})
+        turnDisplayOff({"Save","Display",true,"Turn Display Off","Display Settings"}),
+        onTimeSec({"Time","Display",60,"Display On-Time (s)","Display Settings"})
     {
         cfg.addSetting(&turnDisplayOff);
         cfg.addSetting(&onTimeSec);

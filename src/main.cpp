@@ -31,6 +31,7 @@ void ShowDisplay();
 void ShowDisplayOff();
 void updateStatusLED();
 void PinSetup();
+void handeleBoilerState(bool forceON = false);
 
 // WiFi Manager callback functions
 void onWiFiConnected();
@@ -57,12 +58,15 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 // globale helpers variables
-float temperature = 0.0;      // current temperature in Celsius
+float temperature = 70.0;      // current temperature in Celsius
 int boilerTimeRemaining = 0; // remaining time for boiler in minutes
 bool boilerState = false;    // current state of the heater (on/off)
 
 bool tickerActive = false;    // flag to indicate if the ticker is active
 bool displayActive = true;   // flag to indicate if the display is active
+
+// Global alarm state for temperature monitoring
+static bool globalAlarmState = false;
 
 // Non-blocking MQTT reconnection state management
 enum MqttReconnectState {
@@ -116,6 +120,13 @@ void setup()
   cfg.loadAll();
 
   cfg.checkSettingsForErrors();
+
+  // Debug: Print boiler threshold settings
+  sl->Printf("Boiler Settings Debug:").Debug();
+  sl->Printf("  onThreshold: %.1f°C", boilerSettings.onThreshold.get()).Debug();
+  sl->Printf("  offThreshold: %.1f°C", boilerSettings.offThreshold.get()).Debug();
+  sl->Printf("  enabled: %s", boilerSettings.enabled.get() ? "true" : "false").Debug();
+
   // Re-apply relay pin modes with loaded settings (pins/polarity may differ from defaults)
   Relays::initPins();
 
@@ -158,11 +169,23 @@ void setup()
         o["Bo_SettedTime"] = boilerSettings.boilerTimeMin.get();
         o["Bo_TimeLeft"] = boilerTimeRemaining;
         o["Bo_Temp"] = temperature;
+
+        // Show alarm status (check if temperature is below threshold)
+        static bool alarmActive = false;
+        if (temperature < 60.0f) {
+            alarmActive = true;
+        } else if (temperature > 65.0f) {
+            alarmActive = false;
+        }
+        o["Bo_AlarmActive"] = alarmActive;
     }
   });
 
   cfg.defineRuntimeField("Boiler", "Bo_Temp", "temperature", "°C", 1, 10);
   cfg.defineRuntimeField("Boiler", "Bo_TimeLeft", "time left", "min", 1, 60);
+
+  // Add alarm status to Boiler provider for better visibility
+  cfg.defineRuntimeField("Boiler", "Bo_AlarmActive", "alarm active", "", 0, 1);
 
 
   // Add interactive controls Set-Boiler
@@ -175,7 +198,63 @@ void setup()
   cfg.defineRuntimeStateButton("Hand overrides", "sb_mode", "Will Duschen", [](){ return stateBtnState; }, [](bool v){
     stateBtnState = v;  Relays::setBoiler(v);}, /*init*/ false, 91);
 
+  // Add alarms provider BEFORE defining alarms
+  cfg.addRuntimeProvider({
+      .name = "Alarms",
+      .fill = [](JsonObject &o){
+          // Same hysteresis logic as in the alarm
+          if (globalAlarmState) {
+              // Currently heating -> turn OFF when temp reaches offThreshold
+              if (temperature >= boilerSettings.offThreshold.get()) {
+                  globalAlarmState = false;
+              }
+          } else {
+              // Currently not heating -> turn ON when temp falls below onThreshold
+              if (temperature <= boilerSettings.onThreshold.get()) {
+                  globalAlarmState = true;
+              }
+          }
 
+          o["AL_Status"] = globalAlarmState;
+          o["Current_Temp"] = temperature;
+          o["On_Threshold"] = boilerSettings.onThreshold.get();
+          o["Off_Threshold"] = boilerSettings.offThreshold.get();
+      }
+  });  // Define the alarm status fields (NO boolean control, just display)
+  cfg.defineRuntimeField("Alarms", "AL_Status", "alarm triggered", "", 0, 1);
+  cfg.defineRuntimeField("Alarms", "Current_Temp", "current temp", "°C", 1, 100);
+  cfg.defineRuntimeField("Alarms", "On_Threshold", "on threshold", "°C", 1, 101);
+  cfg.defineRuntimeField("Alarms", "Off_Threshold", "off threshold", "°C", 1, 102);
+
+  // Define a runtime alarm to control the boiler based on temperature with hysteresis
+  cfg.defineRuntimeAlarm(
+              "temp_low",
+              [](const JsonObject &root)
+              {
+                  // Alarm is always enabled - just return the global state
+                  return globalAlarmState;
+              },
+              []()
+              {
+                  Serial.println("[ALARM] -> HEATER ON");
+                  sl->Printf("[ALARM] Temperature %.1f°C -> HEATER ON", temperature).Info();
+                  handeleBoilerState(true);
+              },
+              []()
+              {
+                  Serial.println("[ALARM] -> HEATER OFF");
+                  sl->Printf("[ALARM] Temperature %.1f°C -> HEATER OFF", temperature).Info();
+                  handeleBoilerState(false);
+              });
+
+  // Temperature slider for testing (initialize with current temperature value)
+  static float transientFloatVal = temperature; // Initialize with current temperature
+  cfg.defineRuntimeFloatSlider("Hand overrides", "f_adj", "Temperature Test", -10.0f, 100.0f, temperature, 1, [](){
+        return transientFloatVal; }, [](float v){
+            transientFloatVal = v;
+            temperature = v;
+            sl->Printf("Temperature manually set to %.1f°C via slider", v).Debug();
+        }, 93, String("°C"));
 
   //---------------------------------------------------------------------------------------------------
 }
@@ -386,6 +465,44 @@ void cb_MQTTListener()
 // HELPER FUNCTIONS
 //----------------------------------------
 
+void handeleBoilerState(bool forceON)
+{
+  static unsigned long lastBoilerCheck = 0;
+  unsigned long now = millis();
+
+  if (now - lastBoilerCheck >= 1000) // Check every second
+  {
+    lastBoilerCheck = now;
+
+    if (boilerSettings.enabled.get() || forceON)
+    {
+      if (boilerTimeRemaining > 0)
+      {
+        if (!Relays::getBoiler())
+        {
+          Relays::setBoiler(true); // Turn on the boiler
+        }
+        boilerTimeRemaining--;
+      }
+      else
+      {
+        if (Relays::getBoiler())
+        {
+          Relays::setBoiler(false); // Turn off the boiler
+        }
+      }
+    }
+    else
+    {
+      if (Relays::getBoiler())
+      {
+        Relays::setBoiler(false); // Turn off the boiler if disabled
+      }
+    }
+  }
+}
+
+
 void SetupCheckForResetButton()
 {
   // check for pressed reset button
@@ -396,10 +513,10 @@ void SetupCheckForResetButton()
     sll->Internal("Reset all settings!");
     cfg.clearAllFromPrefs(); // Clear all settings from EEPROM
     cfg.saveAll();           // Save the default settings to EEPROM
-    
+
     // Show user feedback that reset is happening
     sll->Internal("Settings reset complete - restarting...");
-    
+
     ESP.restart();           // Restart the ESP32
   }
 }
@@ -480,7 +597,7 @@ void WriteToDisplay()
   static int lastTimeRemaining = -1;
   static bool lastBoilerState = false;
   static bool lastDisplayActive = true;
-  
+
   if (displayActive == false)
   {
     // If display was just turned off, clear it once
@@ -491,20 +608,20 @@ void WriteToDisplay()
     }
     return; // exit the function if the display is not active
   }
-  
+
   lastDisplayActive = true;
-  
+
   // Only update display if values have changed
   bool needsUpdate = false;
-  if (abs(temperature - lastTemperature) > 0.1 || 
-      boilerTimeRemaining != lastTimeRemaining || 
+  if (abs(temperature - lastTemperature) > 0.1 ||
+      boilerTimeRemaining != lastTimeRemaining ||
       boilerState != lastBoilerState) {
     needsUpdate = true;
     lastTemperature = temperature;
     lastTimeRemaining = boilerTimeRemaining;
     lastBoilerState = boilerState;
   }
-  
+
   if (!needsUpdate) {
     return; // No changes, skip display update
   }
@@ -549,16 +666,16 @@ void CheckButtons()
   static bool lastResetButtonState = HIGH;
   static bool lastAPButtonState = HIGH;
   static unsigned long lastButtonCheck = 0;
-  
+
   // Debounce: only check buttons every 50ms
   if (millis() - lastButtonCheck < 50) {
     return;
   }
   lastButtonCheck = millis();
-  
+
   bool currentResetState = digitalRead(buttonSettings.resetDefaultsPin.get());
   bool currentAPState = digitalRead(buttonSettings.apModePin.get());
-  
+
   // Check for button press (transition from HIGH to LOW)
   if (lastResetButtonState == HIGH && currentResetState == LOW)
   {
@@ -571,7 +688,7 @@ void CheckButtons()
     sl->Internal("AP-Mode-Button pressed -> Start Display Ticker...");
     ShowDisplay();
   }
-  
+
   lastResetButtonState = currentResetState;
   lastAPButtonState = currentAPState;
 }
@@ -660,20 +777,20 @@ void onWiFiConnected() {
   sl->Debug("WiFi connected! Activating services...");
   sll->Debug("WiFi reconnected!");
   sll->Debug("Reattach ticker.");
-  
+
   if (!tickerActive) {
     ShowDisplay(); // Show the display
-    
+
     // Start MQTT tickers
     PublischMQTTTicker.attach(mqttSettings.MQTTPublischPeriod.get(), cb_PublishToMQTT);
     ListenMQTTTicker.attach(mqttSettings.MQTTListenPeriod.get(), cb_MQTTListener);
-    
+
     // Start OTA if enabled
     if(systemSettings.allowOTA.get()){
         sll->Debug("Start OTA-Module");
         cfg.setupOTA(APP_NAME, systemSettings.otaPassword.get().c_str());
     }
-    
+
     tickerActive = true;
   }
 }
@@ -682,20 +799,20 @@ void onWiFiDisconnected() {
   sl->Debug("WiFi disconnected! Deactivating services...");
   sll->Debug("WiFi lost connection!");
   sll->Debug("deactivate mqtt ticker.");
-  
+
   if (tickerActive) {
     ShowDisplay(); // Show the display to indicate WiFi is lost
-    
+
     // Stop MQTT tickers
     PublischMQTTTicker.detach();
     ListenMQTTTicker.detach();
-    
+
     // Stop OTA if it should be disabled
     if (systemSettings.allowOTA.get() == false && cfg.isOTAInitialized()) {
       sll->Debug("Stop OTA-Module");
       cfg.stopOTA();
     }
-    
+
     tickerActive = false;
   }
 }
@@ -703,7 +820,7 @@ void onWiFiDisconnected() {
 void onWiFiAPMode() {
   sl->Debug("WiFi in AP mode");
   sll->Debug("Running in AP mode!");
-  
+
   // Ensure services are stopped in AP mode
   if (tickerActive) {
     onWiFiDisconnected(); // Reuse disconnected logic
