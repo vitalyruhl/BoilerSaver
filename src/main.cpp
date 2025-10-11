@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <PubSubClient.h> // for MQTT
 #include <esp_task_wdt.h> // for watchdog timer
 #include <Ticker.h>
 #include "Wire.h"
@@ -13,11 +12,11 @@ AsyncWebServer server(80);
 #include "helpers/helpers.h"
 #include "helpers/relays.h"
 #include "helpers/wifi_manager.h"
+#include "helpers/mqtt_manager.h"
 
 // predeclare the functions (prototypes)
 void SetupStartDisplay();
-void reconnectMQTT();
-void handleMqttReconnection(); // Non-blocking MQTT reconnection handler
+void publishToMQTT();
 void cb_MQTT(char *topic, byte *message, unsigned int length);
 void publishToMQTT();
 void cb_PublishToMQTT();
@@ -48,14 +47,12 @@ h3 { color: orange; text-decoration: underline; }
 
 Helpers helpers;
 WiFiManager wifiManager; // Global WiFi Manager instance
+MQTTManager mqttManager;     // Global MQTT Manager instance
 
 Ticker PublischMQTTTicker;
 Ticker PublischMQTTTSettingsTicker;
 Ticker ListenMQTTTicker;
 Ticker displayTicker;
-
-WiFiClient espClient;
-PubSubClient client(espClient);
 
 // globale helpers variables
 float temperature = 70.0;      // current temperature in Celsius
@@ -69,23 +66,6 @@ bool displayActive = true;   // flag to indicate if the display is active
 static bool globalAlarmState = false;
 
 // Non-blocking MQTT reconnection state management
-enum MqttReconnectState {
-  MQTT_STATE_IDLE,
-  MQTT_STATE_CONNECTING,
-  MQTT_STATE_WAIT_RESULT,
-  MQTT_STATE_CONNECTED,
-  MQTT_STATE_FAILED
-};
-
-
-//non blocking MQTT reconnection variables
-static MqttReconnectState mqttState = MQTT_STATE_IDLE;
-static unsigned long mqttLastAttempt = 0;
-static int mqttRetryCount = 0;
-static const int mqttMaxRetries = 10;
-static const unsigned long mqttRetryInterval = 5000; // 5 seconds between attempts
-static const unsigned long mqttConnectTimeout = 10000; // 10 seconds to wait for connection
-
 // Non-blocking display update management
 static unsigned long lastDisplayUpdate = 0;
 static const unsigned long displayUpdateInterval = 100; // Update display every 100ms
@@ -149,8 +129,33 @@ void setup()
   // -- Setup MQTT connection --
   sl->Printf("⚠️ SETUP: Starting MQTT! [%s]", mqttSettings.mqtt_server.get().c_str()).Debug();
   sll->Printf("Starting MQTT! [%s]", mqttSettings.mqtt_server.get().c_str()).Debug();
-  client.setServer(mqttSettings.mqtt_server.get().c_str(), static_cast<uint16_t>(mqttSettings.mqtt_port.get())); // Set the MQTT server and port
-  client.setCallback(cb_MQTT);
+  
+  // Configure MQTT Manager
+  mqttManager.setServer(mqttSettings.mqtt_server.get().c_str(), static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
+  mqttManager.setCredentials(mqttSettings.mqtt_username.get().c_str(), mqttSettings.mqtt_password.get().c_str());
+  mqttManager.setClientId(("ESP32_" + String(WiFi.macAddress())).c_str());
+  mqttManager.setMaxRetries(10);
+  mqttManager.setRetryInterval(5000);
+  
+  // Set MQTT callbacks
+  mqttManager.onConnected([]() {
+    sl->Printf("Ready to subscribe to MQTT topics...").Debug();
+    sl->Printf("Propagate initial boiler settings to MQTT...").Debug();
+    // Subscribe to topics
+    mqttManager.subscribe(mqttSettings.mqtt_Settings_SetState_topic.get().c_str());
+    // Publish initial values
+    publishToMQTT();
+  });
+  
+  mqttManager.onDisconnected([]() {
+    sl->Printf("MQTT disconnected callback triggered").Debug();
+  });
+  
+  mqttManager.onMessage([](char* topic, byte* payload, unsigned int length) {
+    cb_MQTT(topic, payload, length);
+  });
+  
+  mqttManager.begin();
 
   sl->Debug("System setup completed.");
   sll->Debug("Setup completed.");
@@ -216,11 +221,15 @@ void setup()
           }
 
           o["AL_Status"] = globalAlarmState;
+          o["AL_LT"] = globalAlarmState;  // Set boolean control too
           o["Current_Temp"] = temperature;
           o["On_Threshold"] = boilerSettings.onThreshold.get();
           o["Off_Threshold"] = boilerSettings.offThreshold.get();
       }
-  });  // Define the alarm status fields (NO boolean control, just display)
+  });
+
+  // Define alarm controls and status fields
+  cfg.defineRuntimeBool("Alarms", "AL_LT", "Temperature Low Alarm", false, /*order*/ 90);
   cfg.defineRuntimeField("Alarms", "AL_Status", "alarm triggered", "", 0, 1);
   cfg.defineRuntimeField("Alarms", "Current_Temp", "current temp", "°C", 1, 100);
   cfg.defineRuntimeField("Alarms", "On_Threshold", "on threshold", "°C", 1, 101);
@@ -281,8 +290,8 @@ void loop()
       cfg.handleRuntimeAlarms();
   }
 
-  // Handle non-blocking MQTT reconnection
-  handleMqttReconnection();
+  // Handle MQTT Manager loop
+  mqttManager.loop();
 
   updateStatusLED();
   cfg.handleClient();
@@ -295,132 +304,15 @@ void loop()
 // MQTT FUNCTIONS
 //----------------------------------------
 
-void handleMqttReconnection()
-{
-  // Only handle MQTT when WiFi is connected and not in AP mode
-  if (WiFi.status() != WL_CONNECTED || WiFi.getMode() == WIFI_AP) {
-    mqttState = MQTT_STATE_IDLE;
-    return;
-  }
-
-  unsigned long now = millis();
-
-  switch (mqttState) {
-    case MQTT_STATE_IDLE:
-      // Check if MQTT is connected
-      if (client.connected()) {
-        mqttState = MQTT_STATE_CONNECTED;
-        mqttRetryCount = 0; // Reset retry counter on successful connection
-      } else {
-        // Start reconnection process
-        mqttState = MQTT_STATE_CONNECTING;
-        mqttLastAttempt = now;
-        sl->Printf("MQTT disconnected. Starting reconnection attempt %d/%d",
-                   mqttRetryCount + 1, mqttMaxRetries).Debug();
-        sll->Debug("MQTT reconnecting...");
-      }
-      break;
-
-    case MQTT_STATE_CONNECTING:
-      // Only attempt connection once per state entry
-      if (now - mqttLastAttempt >= 100) { // Small delay to prevent immediate retry
-        // Set server configuration
-        IPAddress mqttIP;
-        if (mqttIP.fromString(mqttSettings.mqtt_server.get())) {
-          client.setServer(mqttIP, static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
-        } else {
-          client.setServer(mqttSettings.mqtt_server.get().c_str(),
-                          static_cast<uint16_t>(mqttSettings.mqtt_port.get()));
-        }
-
-        sl->Printf("Attempting MQTT connection to %s:%d (attempt %d/%d)",
-                   mqttSettings.mqtt_server.get().c_str(),
-                   mqttSettings.mqtt_port.get(),
-                   mqttRetryCount + 1, mqttMaxRetries).Debug();
-
-        // Attempt non-blocking connection
-        bool connected = client.connect(
-          mqttSettings.Publish_Topic.get().c_str(),
-          mqttSettings.mqtt_username.get().c_str(),
-          mqttSettings.mqtt_password.get().c_str()
-        );
-
-        mqttState = MQTT_STATE_WAIT_RESULT;
-        mqttLastAttempt = now;
-      }
-      break;
-
-    case MQTT_STATE_WAIT_RESULT:
-      // Check connection result
-      if (client.connected()) {
-        sl->Debug("MQTT connected successfully!");
-        sll->Debug("MQTT connected!");
-        mqttState = MQTT_STATE_CONNECTED;
-        mqttRetryCount = 0;
-
-        // Subscribe to topics here if needed
-        sl->Debug("Ready to subscribe to MQTT topics...");
-
-        //propagate initial boiler Settings to MQTT on startup
-        sl->Debug("Propagate initial boiler settings to MQTT...");
-        client.publish(mqttSettings.mqtt_Settings_SetState_topic.get().c_str(), String(mqttSettings.mqtt_Settings_SetState.get()).c_str());
-        client.publish(mqttSettings.mqtt_Settings_ShowerTime_topic.get().c_str(), String(mqttSettings.mqtt_Settings_ShowerTime.get()).c_str());
-
-      } else if (now - mqttLastAttempt > mqttConnectTimeout) {
-        // Connection attempt timed out
-        mqttRetryCount++;
-        sl->Printf("MQTT connection timeout (rc=%d). Retry %d/%d",
-                   client.state(), mqttRetryCount, mqttMaxRetries).Error();
-
-        client.disconnect(); // Clean disconnect
-
-        if (mqttRetryCount >= mqttMaxRetries) {
-          mqttState = MQTT_STATE_FAILED;
-          sl->Printf("MQTT reconnection failed after %d attempts", mqttMaxRetries).Error();
-          sll->Error("MQTT reconnection failed!");
-        } else {
-          mqttState = MQTT_STATE_IDLE;
-          mqttLastAttempt = now; // Reset timer for next attempt
-        }
-      }
-      break;
-
-    case MQTT_STATE_CONNECTED:
-      // Continuously check if still connected
-      if (!client.connected()) {
-        sl->Debug("MQTT connection lost");
-        sll->Debug("MQTT connection lost");
-        mqttState = MQTT_STATE_IDLE;
-      }
-      break;
-
-    case MQTT_STATE_FAILED:
-      // Wait before trying again (much longer interval after total failure)
-      if (now - mqttLastAttempt > 30000) { // Wait 30 seconds after failure
-        sl->Debug("Retrying MQTT after failure timeout");
-        mqttRetryCount = 0;
-        mqttState = MQTT_STATE_IDLE;
-      }
-      break;
-  }
-}
-
-void reconnectMQTT()
-{
-  // Reset state to trigger reconnection
-  mqttState = MQTT_STATE_IDLE;
-  mqttRetryCount = 0;
-}
-
 void publishToMQTT()
 {
-  if (client.connected())
+  if (mqttManager.isConnected())
   {
     sl->Debug("publishToMQTT: Publishing to MQTT...");
     sll->Debug("Publishing to MQTT...");
-    client.publish(mqttSettings.mqtt_publish_AktualBoilerTemperature.c_str(), String(temperature).c_str());
-    client.publish(mqttSettings.mqtt_publish_AktualTimeRemaining_topic.c_str(), String(boilerTimeRemaining).c_str());
-    client.publish(mqttSettings.mqtt_publish_AktualState.c_str(), String(boilerState).c_str());
+    mqttManager.publish(mqttSettings.mqtt_publish_AktualBoilerTemperature.c_str(), String(temperature));
+    mqttManager.publish(mqttSettings.mqtt_publish_AktualTimeRemaining_topic.c_str(), String(boilerTimeRemaining));
+    mqttManager.publish(mqttSettings.mqtt_publish_AktualState.c_str(), String(boilerState));
   }
   else
   {
@@ -458,7 +350,7 @@ void cb_PublishToMQTT()
 
 void cb_MQTTListener()
 {
-  client.loop(); // process incoming MQTT messages
+  mqttManager.loop(); // process MQTT connection and incoming messages
 }
 
 //----------------------------------------
