@@ -12,6 +12,7 @@ AsyncWebServer server(80);
 #include "logging/logging.h"
 #include "helpers/helpers.h"
 #include "helpers/relays.h"
+#include "helpers/wifi_manager.h"
 
 // predeclare the functions (prototypes)
 void SetupStartDisplay();
@@ -31,6 +32,11 @@ void ShowDisplayOff();
 void updateStatusLED();
 void PinSetup();
 
+// WiFi Manager callback functions
+void onWiFiConnected();
+void onWiFiDisconnected();
+void onWiFiAPMode();
+
 //--------------------------------------------------------------------------------------------------------------
 
 #pragma region configuration variables
@@ -40,6 +46,7 @@ h3 { color: orange; text-decoration: underline; }
 )CSS";
 
 Helpers helpers;
+WiFiManager wifiManager; // Global WiFi Manager instance
 
 Ticker PublischMQTTTicker;
 Ticker PublischMQTTTSettingsTicker;
@@ -56,10 +63,6 @@ bool boilerState = false;    // current state of the heater (on/off)
 
 bool tickerActive = false;    // flag to indicate if the ticker is active
 bool displayActive = true;   // flag to indicate if the display is active
-
-// WiFi downtime tracking for auto reboot
-static unsigned long wifiLastGoodMillis = 0;     // last time WiFi was connected (and not AP)
-static bool wifiAutoRebootArmed = false;         // becomes true after initial setup completion
 
 // Non-blocking MQTT reconnection state management
 enum MqttReconnectState {
@@ -78,12 +81,11 @@ static int mqttRetryCount = 0;
 static const int mqttMaxRetries = 10;
 static const unsigned long mqttRetryInterval = 5000; // 5 seconds between attempts
 static const unsigned long mqttConnectTimeout = 10000; // 10 seconds to wait for connection
-// Non-blocking WiFi reconnection state management
-static unsigned long lastWifiReconnectAttempt = 0;
-static const unsigned long wifiReconnectInterval = 10000; // 10 seconds between attempts
+
 // Non-blocking display update management
 static unsigned long lastDisplayUpdate = 0;
 static const unsigned long displayUpdateInterval = 100; // Update display every 100ms
+
 #pragma endregion configuration variables
 
 //----------------------------------------
@@ -142,13 +144,9 @@ void setup()
   sl->Debug("System setup completed.");
   sll->Debug("Setup completed.");
 
-  // initialize WiFi tracking
-  if(WiFi.status() == WL_CONNECTED && WiFi.getMode() != WIFI_AP){
-    wifiLastGoodMillis = millis();
-  } else {
-    wifiLastGoodMillis = millis(); // start timer now; will reboot later if never connects
-  }
-  wifiAutoRebootArmed = true; // after setup we start watching
+  // Initialize WiFi Manager
+  wifiManager.begin(10000, systemSettings.wifiRebootTimeoutMin.get()); // 10s reconnect interval, auto-reboot timeout from settings
+  wifiManager.setCallbacks(onWiFiConnected, onWiFiDisconnected, onWiFiAPMode);
 
   //---------------------------------------------------------------------------------------------------
   // Runtime live values provider for relay outputs
@@ -184,91 +182,16 @@ void setup()
 
 void loop()
 {
-
-  
   CheckButtons();
   boilerState = Relays::getBoiler();
 
-  if (WiFi.status() == WL_CONNECTED && WiFi.getMode() != WIFI_AP)
-  {
-    if (!tickerActive) // Check if the ticker is not already active
-    {
-      ShowDisplay(); // Show the display
-      sl->Debug("WiFi connected! Reattach ticker.");
-      sll->Debug("WiFi reconnected!");
-      sll->Debug("Reattach ticker.");
-      PublischMQTTTicker.attach(mqttSettings.MQTTPublischPeriod.get(), cb_PublishToMQTT); // Reattach the ticker if WiFi is connected
-      ListenMQTTTicker.attach(mqttSettings.MQTTListenPeriod.get(), cb_MQTTListener);      // Reattach the ticker if WiFi is connected
-      if(systemSettings.allowOTA.get()){
-          sll->Debug("Start OTA-Module");
-          cfg.setupOTA(APP_NAME, systemSettings.otaPassword.get().c_str());
-      }
-      tickerActive = true; // Set the flag to indicate that the ticker is active
-    }
-    // Update last good WiFi timestamp when connected (station mode only)
-    wifiLastGoodMillis = millis();
-  }
-  else
-  {
-    if (tickerActive) // Check if the ticker is already active
-    {
-      ShowDisplay(); // Show the display to indicate WiFi is lost
-      sl->Debug("WiFi not connected or in AP mode! deactivate ticker.");
-      sll->Debug("WiFi lost connection!");
-      sll->Debug("or run in AP mode!");
-      sll->Debug("deactivate mqtt ticker.");
-      PublischMQTTTicker.detach(); // Stop the ticker if WiFi is not connected or in AP mode
-      ListenMQTTTicker.detach();   // Stop the ticker if WiFi is not connected or in AP mode
-      tickerActive = false;        // Set the flag to indicate that the ticker is not active
-
-      // check if ota is active and settings is off, reboot device, to stop ota
-      if (systemSettings.allowOTA.get() == false && cfg.isOTAInitialized())
-      {
-        sll->Debug("Stop OTA-Module");
-        cfg.stopOTA();
-      }
-    }
-    
-    // Non-blocking WiFi reconnection (only if not in AP mode)
-    if (WiFi.getMode() != WIFI_AP) {
-      unsigned long now = millis();
-      if (now - lastWifiReconnectAttempt > wifiReconnectInterval) {
-        lastWifiReconnectAttempt = now;
-        sl->Debug("Attempting WiFi reconnection...");
-        sll->Debug("reconnect to WiFi...");
-        WiFi.reconnect(); // Non-blocking reconnect attempt
-      }
-    }
-    
-    // Auto reboot logic: only if not AP mode, feature enabled and timeout exceeded
-    if (wifiAutoRebootArmed && WiFi.getMode() != WIFI_AP){
-        int timeoutMin = systemSettings.wifiRebootTimeoutMin.get();
-        if(timeoutMin > 0){
-            unsigned long now = millis();
-            unsigned long elapsedMs = now - wifiLastGoodMillis;
-            unsigned long thresholdMs = (unsigned long)timeoutMin * 60000UL;
-            if(elapsedMs > thresholdMs){
-                sl->Printf("[WiFi] Lost for > %d min -> reboot", timeoutMin).Error();
-                sll->Printf("WiFi lost -> reboot").Error();
-                ESP.restart();
-            }
-        }
-    }
-  }
+  // Update WiFi Manager - handles all WiFi logic
+  wifiManager.update();
 
   // Non-blocking display updates
   if (millis() - lastDisplayUpdate > displayUpdateInterval) {
     lastDisplayUpdate = millis();
     WriteToDisplay();
-  }
-
-  if (WiFi.getMode() == WIFI_AP) {
-    // Show we are in AP mode - non-blocking
-    static unsigned long lastAPMessage = 0;
-    if (millis() - lastAPMessage > 5000) {
-      lastAPMessage = millis();
-      sll->Debug("Running in AP mode!");
-    }
   }
 
   // Evaluate cross-field runtime alarms periodically (cheap doc build ~ small JSON)
@@ -684,8 +607,8 @@ void updateStatusLED() {
     static uint8_t phase = 0;
     unsigned long now = millis();
 
-    bool apMode = WiFi.getMode() == WIFI_AP;
-    bool connected = !apMode && WiFi.status() == WL_CONNECTED;
+    bool connected = wifiManager.isConnected();
+    bool apMode = wifiManager.isInAPMode();
 
     if (apMode) {
         // simple fast blink 5Hz (100/100)
@@ -727,5 +650,63 @@ void updateStatusLED() {
             if (now - lastChange >= 200) { phase = 0; lastChange = now; }
             break;
     }
+}
+
+//----------------------------------------
+// WIFI MANAGER CALLBACK FUNCTIONS
+//----------------------------------------
+
+void onWiFiConnected() {
+  sl->Debug("WiFi connected! Activating services...");
+  sll->Debug("WiFi reconnected!");
+  sll->Debug("Reattach ticker.");
+  
+  if (!tickerActive) {
+    ShowDisplay(); // Show the display
+    
+    // Start MQTT tickers
+    PublischMQTTTicker.attach(mqttSettings.MQTTPublischPeriod.get(), cb_PublishToMQTT);
+    ListenMQTTTicker.attach(mqttSettings.MQTTListenPeriod.get(), cb_MQTTListener);
+    
+    // Start OTA if enabled
+    if(systemSettings.allowOTA.get()){
+        sll->Debug("Start OTA-Module");
+        cfg.setupOTA(APP_NAME, systemSettings.otaPassword.get().c_str());
+    }
+    
+    tickerActive = true;
+  }
+}
+
+void onWiFiDisconnected() {
+  sl->Debug("WiFi disconnected! Deactivating services...");
+  sll->Debug("WiFi lost connection!");
+  sll->Debug("deactivate mqtt ticker.");
+  
+  if (tickerActive) {
+    ShowDisplay(); // Show the display to indicate WiFi is lost
+    
+    // Stop MQTT tickers
+    PublischMQTTTicker.detach();
+    ListenMQTTTicker.detach();
+    
+    // Stop OTA if it should be disabled
+    if (systemSettings.allowOTA.get() == false && cfg.isOTAInitialized()) {
+      sll->Debug("Stop OTA-Module");
+      cfg.stopOTA();
+    }
+    
+    tickerActive = false;
+  }
+}
+
+void onWiFiAPMode() {
+  sl->Debug("WiFi in AP mode");
+  sll->Debug("Running in AP mode!");
+  
+  // Ensure services are stopped in AP mode
+  if (tickerActive) {
+    onWiFiDisconnected(); // Reuse disconnected logic
+  }
 }
 
