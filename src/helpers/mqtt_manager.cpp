@@ -3,7 +3,7 @@
 // Static instance for callback
 MQTTManager* MQTTManager::_instance = nullptr;
 
-MQTTManager::MQTTManager() 
+MQTTManager::MQTTManager()
     : _mqttClient(_wifiClient)
     , _port(1883)
     , _keepAlive(60)
@@ -44,6 +44,10 @@ void MQTTManager::setKeepAlive(uint16_t keepAlive) {
     _mqttClient.setKeepAlive(keepAlive);
 }
 
+void MQTTManager::setBufferSize(uint16_t size) {
+    _mqttClient.setBufferSize(size);
+}
+
 void MQTTManager::setMaxRetries(uint8_t maxRetries) {
     _maxRetries = maxRetries;
 }
@@ -73,11 +77,11 @@ bool MQTTManager::begin() {
         _clientId = "ESP32_" + String(WiFi.macAddress());
         _clientId.replace(":", "");
     }
-    
+
     _setState(ConnectionState::DISCONNECTED);
     _currentRetry = 0;
     _lastConnectionAttempt = 0;
-    
+
     return true;
 }
 
@@ -154,7 +158,7 @@ bool MQTTManager::publish(const char* topic, const char* payload, bool retained)
     if (!isConnected()) {
         return false;
     }
-    
+
     bool success = _mqttClient.publish(topic, payload, retained);
     return success;
 }
@@ -167,7 +171,7 @@ bool MQTTManager::subscribe(const char* topic, uint8_t qos) {
     if (!isConnected()) {
         return false;
     }
-    
+
     bool success = _mqttClient.subscribe(topic, qos);
     return success;
 }
@@ -176,7 +180,7 @@ bool MQTTManager::unsubscribe(const char* topic) {
     if (!isConnected()) {
         return false;
     }
-    
+
     return _mqttClient.unsubscribe(topic);
 }
 
@@ -194,15 +198,15 @@ uint32_t MQTTManager::getReconnectCount() const {
 void MQTTManager::_attemptConnection() {
     _setState(ConnectionState::CONNECTING);
     _lastConnectionAttempt = millis();
-    
+
     bool connected = false;
-    
+
     if (_username.isEmpty()) {
         connected = _mqttClient.connect(_clientId.c_str());
     } else {
         connected = _mqttClient.connect(_clientId.c_str(), _username.c_str(), _password.c_str());
     }
-    
+
     if (connected) {
         _handleConnection();
     } else {
@@ -216,7 +220,7 @@ void MQTTManager::_handleConnection() {
     _connectionStartTime = millis();
     _currentRetry = 0;
     _reconnectCount++;
-    
+
     if (_onConnected) {
         _onConnected();
     }
@@ -228,7 +232,7 @@ void MQTTManager::_handleDisconnection() {
             _onDisconnected();
         }
     }
-    
+
     _setState(ConnectionState::DISCONNECTED);
     _currentRetry = 0;
 }

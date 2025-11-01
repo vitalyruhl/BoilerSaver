@@ -6,3 +6,4 @@
 /.pio/build
 /ideas
 src/SolarInverterLimiter.code-workspace
+/src/secret

@@ -29,6 +29,7 @@ public:
     void setKeepAlive(uint16_t keepAlive = 60);
     void setMaxRetries(uint8_t maxRetries = 10);
     void setRetryInterval(unsigned long retryInterval = 5000);
+    void setBufferSize(uint16_t size = 256);
 
     // Callbacks
     void onConnected(ConnectedCallback callback);
@@ -39,7 +40,7 @@ public:
     bool begin();
     void loop();
     void disconnect();
-    
+
     // Status
     bool isConnected() const;
     ConnectionState getState() const;
@@ -61,7 +62,7 @@ public:
 private:
     WiFiClient _wifiClient;
     PubSubClient _mqttClient;
-    
+
     // Configuration
     String _server;
     uint16_t _port;
@@ -90,7 +91,7 @@ private:
     void _handleDisconnection();
     void _setState(ConnectionState newState);
     static void _mqttCallback(char* topic, byte* payload, unsigned int length);
-    
+
     // Static instance for callback
     static MQTTManager* _instance;
 };
