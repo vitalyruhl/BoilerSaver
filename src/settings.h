@@ -10,8 +10,8 @@
 
 #include "ConfigManager.h"
 
-#define VERSION "1.0.0"           // version of the software (major.minor.patch)
-#define VERSION_DATE "25.10.2025" // date of the version
+#define VERSION "1.1.0"           // version of the software (major.minor.patch)
+#define VERSION_DATE "04.11.2025" // date of the version
 #define APP_NAME "Boiler-Saver" // name of the application, used for SSID in AP mode and as a prefix for the hostname
 
 // Watchdog timeout remains compile-time constant

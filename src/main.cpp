@@ -60,6 +60,9 @@ void onWiFiAPMode();
 
 static const char GLOBAL_THEME_OVERRIDE[] PROGMEM = R"CSS(
 h3 { color: orange; text-decoration: underline; }
+.rw[data-group="sensors"][data-key="temp"] .lab{ color:rgba(16, 23, 198, 1);font-weight:900;font-size: 1.2rem;}
+.rw[data-group="sensors"][data-key="temp"] .val{ color:rgba(16, 23, 198, 1);font-weight:900;font-size: 1.2rem;}
+.rw[data-group="sensors"][data-key="temp"] .un{ color:rgba(16, 23, 198, 1);font-weight:900;font-size: 1.2rem;}
 )CSS";
 
 Helpers helpers;
@@ -119,7 +122,8 @@ void setup()
     ConfigManager.setAppName(APP_NAME);                                                   // Set an application name, used for SSID in AP mode and as a prefix for the hostname
     ConfigManager.setCustomCss(GLOBAL_THEME_OVERRIDE, sizeof(GLOBAL_THEME_OVERRIDE) - 1); // Register global CSS override
     ConfigManager.enableBuiltinSystemProvider();                                          // enable the builtin system provider (uptime, freeHeap, rssi etc.)
-
+    ConfigManager.setSettingsPassword(SETTINGS_PASSWORD);
+    
     sl->Info("[SETUP] Load configuration...");
     initializeAllSettings(); // Register all settings BEFORE loading
 
@@ -128,40 +132,41 @@ void setup()
 
     ConfigManager.loadAll();
 
+    //----------------------------------------------------------------------------------------------------------------------------------
     // set wifi settings if not set yet from my secret folder
-        if (wifiSettings.wifiSsid.get().isEmpty()){
-            sl->Debug ("-------------------------------------------------------------");
-            sl->Debug ("SETUP: *** SSID is empty, setting My values *** ");
-            sl->Debug ("-------------------------------------------------------------");
-            // ConfigManager.clearAllFromPrefs();
-            wifiSettings.wifiSsid.set( MY_WIFI_SSID );
-            wifiSettings.wifiPassword.set( MY_WIFI_PASSWORD );
-            ConfigManager.saveAll();
-            delay(1000); // Small delay
-
-        }
-
-
-    // Debug: Print some settings after loading
-    sl->Debug ("[SETUP] === LOADED SETTINGS (Important) ===");
-    sl->Printf("[SETUP] WiFi SSID: '%s' (length: %d)", wifiSettings.wifiSsid.get().c_str(), wifiSettings.wifiSsid.get().length()).Debug();
-    sl->Printf("[SETUP] WiFi Password:  (length: %d)", wifiSettings.wifiPassword.get().length()).Debug();
-    sl->Printf("[SETUP] WiFi Use DHCP: %s", wifiSettings.useDhcp.get() ? "true" : "false").Debug();
-    sl->Printf("[SETUP] WiFi Static IP: '%s'", wifiSettings.staticIp.get().c_str()).Debug();
-    sl->Printf("[SETUP] WiFi Gateway: '%s'", wifiSettings.gateway.get().c_str()).Debug();
-    sl->Printf("[SETUP] WiFi Subnet: '%s'", wifiSettings.subnet.get().c_str()).Debug();
-    sl->Printf("[SETUP] WiFi DNS1: '%s'", wifiSettings.dnsPrimary.get().c_str()).Debug();
-    sl->Printf("[SETUP] WiFi DNS2: '%s'", wifiSettings.dnsSecondary.get().c_str()).Debug();
-    sl->Debug ("[SETUP] === END SETTINGS ===");
-
-    ConfigManager.checkSettingsForErrors(); // Check for any settings errors and report them in console
-
+    if (wifiSettings.wifiSsid.get().isEmpty())
+    {
+        Serial.println("-------------------------------------------------------------");
+        Serial.println("SETUP: *** SSID is empty, setting My values *** ");
+        Serial.println("-------------------------------------------------------------");
+        wifiSettings.wifiSsid.set(MY_WIFI_SSID);
+        wifiSettings.wifiPassword.set(MY_WIFI_PASSWORD);
+        wifiSettings.staticIp.set(MY_WIFI_IP);
+        wifiSettings.useDhcp.set(false);
+        ConfigManager.saveAll();
+        delay(1000); // Small delay
+    }
     // Serial.println(ConfigManager.toJSON(false)); // Print full configuration JSON to console
 
     PinSetup(); // Setup GPIO pins for buttons ToDO: move it to Relays and rename it in GPIOSetup()
     sl->Debug("[SETUP] Check for reset/AP button...");
     SetupCheckForResetButton();
     SetupCheckForAPModeButton();
+
+    
+    //----------------------------------------------------------------------------------------------------------------------------------
+    // Configure Smart WiFi Roaming with default values (can be customized in setup if needed)
+    ConfigManager.enableSmartRoaming(true);            // Re-enabled now that WiFi stack is fixed
+    ConfigManager.setRoamingThreshold(-75);            // Trigger roaming at -75 dBm
+    ConfigManager.setRoamingCooldown(30);              // Wait 30 seconds between attempts (reduced from 120)
+    ConfigManager.setRoamingImprovement(10);           // Require 10 dBm improvement
+    Serial.println("[MAIN] Smart WiFi Roaming enabled with WiFi stack fix");
+
+    //----------------------------------------------------------------------------------------------------------------------------------
+    // Configure WiFi AP MAC filtering/priority (example - customize as needed)
+    // ConfigManager.setWifiAPMacFilter("60:B5:8D:4C:E1:D5");     // Only connect to this specific AP
+    ConfigManager.setWifiAPMacPriority("e0-08-55-92-55-ac");   // Prefer this AP, fallback to others
+
 
     // init modules...
     sl->Info("[SETUP] init modules...");
@@ -188,7 +193,11 @@ void setup()
     }
 
     setupGUI();
+    // Enhanced WebSocket configuration
     ConfigManager.enableWebSocketPush(); // Enable WebSocket push for real-time updates
+    ConfigManager.setWebSocketInterval(1000); // Faster updates - every 1 second
+    ConfigManager.setPushOnConnect(true);     // Immediate data on client connect
+
     //---------------------------------------------------------------------------------------------------
     sl->Info("[SETUP] System setup completed.");
     sll->Info("Setup completed.");
@@ -199,7 +208,17 @@ void loop()
     CheckButtons();
     boilerState = Relays::getBoiler(); // get Relay state
 
+    
+    //-------------------------------------------------------------------------------------------------------------
+    // for working with the ConfigManager nessesary in loop
+    ConfigManager.updateLoopTiming(); // Update internal loop timing metrics for system provider
     ConfigManager.getWiFiManager().update(); // Update WiFi Manager - handles all WiFi logic
+    ConfigManager.handleClient(); // Handle web server client requests
+    ConfigManager.handleWebsocketPush(); // Handle WebSocket push updates
+    ConfigManager.handleOTA();           // Handle OTA updates
+    ConfigManager.handleRuntimeAlarms(); // Handle runtime alarms
+    //-------------------------------------------------------------------------------------------------------------
+
 
     // Non-blocking display updates
     if (millis() - lastDisplayUpdate > displayUpdateInterval)
@@ -245,10 +264,6 @@ void loop()
     // Advance boiler/timer logic once per second (function is self-throttled)
     handeleBoilerState(false);
 
-    ConfigManager.handleClient();
-    ConfigManager.handleWebsocketPush();
-    ConfigManager.getOTAManager().handle();
-    ConfigManager.updateLoopTiming(); // Update internal loop timing metrics for system provider
     updateStatusLED();       // Schedule LED patterns if WiFi state changed
     Blinker::loopAll();      // Advance all blinker state machines
     delay(10); // Small delay
@@ -383,15 +398,23 @@ void setupGUI()
         { transientFloatVal = v;
             temperature = v;
             sl->Printf("[MAIN] Temperature manually set to %.1f°C via slider", v).Debug();
-        }, String("°C"));
+    }, String("°C"));
 #endif
 
-    // State button to manually control the boiler relay
-    ConfigManager.defineRuntimeStateButton("Boiler", "sb_mode", "Will Shower", []()
-        { return willShowerRequested; }, [](bool v) {
-            handleShowerRequest(v);
-        }, /*init*/ false);
+    // Ensure interactive control is placed under Boiler group (project convention)
 
+    // State button to manually control the boiler relay (under Boiler card)
+    // Note: Provide helpText and sortOrder for predictable placement.
+    ConfigManager.defineRuntimeStateButton(
+        "Boiler",              // group (Boiler section)
+        "sb_mode",             // key (short, URL-safe)
+        "Will Shower",         // label shown in the UI
+        []() { return willShowerRequested; },   // getter
+        [](bool v) { handleShowerRequest(v); }, // setter
+        /*defaultState*/ false,
+        /*helpText*/ "Request hot water now; toggles boiler for a shower",
+        /*sortOrder*/ 90
+    );
     CRM().setRuntimeAlarmActive(TEMP_ALARM_ID, globalAlarmState, false);
 }
 
