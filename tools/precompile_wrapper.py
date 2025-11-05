@@ -20,12 +20,22 @@ except Exception:
     print("[precompile_wrapper] SCons environment not available, running in standalone mode")
     SCONS_AVAILABLE = False
 
+# Write debug log immediately to capture early execution
+# Use an alternative method to determine the script's directory
+project_dir = Path(os.getcwd())
+with open(project_dir / "wrapper_debug.log", "w") as debug_log:
+    debug_log.write("[DEBUG] Wrapper script invoked\n")
+    debug_log.write(f"Current working directory: {os.getcwd()}\n")
+    debug_log.write("Environment variables:\n")
+    for key, value in os.environ.items():
+        debug_log.write(f"{key}={value}\n")
+
 def main():
     if not SCONS_AVAILABLE:
         print("[precompile_wrapper] Starting precompile wrapper...")
     
     # Get the project directory
-    project_dir = Path(__file__).parent.parent
+    project_dir = Path(os.getcwd())
     
     if not SCONS_AVAILABLE:
         print(f"[precompile_wrapper] Project directory: {project_dir}")
@@ -219,17 +229,12 @@ def main():
         os.chdir(str(lib_path))
         print(f"[precompile_wrapper] Changed CWD to: {os.getcwd()}")
         print(f"[precompile_wrapper] Running: {sys.executable} {precompile_script}")
-        # If published package lacks webui sources, try to hydrate from a local lib path
+        
+        # Always try to ensure webui sources are available
         try:
-            has_sources = _ensure_webui_sources(lib_path)
+            _ensure_webui_sources(lib_path)
         except Exception as e_copy:
             print(f"[precompile_wrapper] Note: could not ensure webui sources: {e_copy}")
-            has_sources = False
-
-        if not has_sources:
-            # Do not invoke precompile script; keep packaged header as-is
-            print("[precompile_wrapper] Skipping precompile since webui sources are unavailable.")
-            return
 
         # Ensure header generator is available where library expects it (lib/tools)
         try:
@@ -264,6 +269,37 @@ def main():
                 env_vars['npm_config_force'] = 'true'
         except Exception as e:
             print(f"[precompile_wrapper] Warning: could not purge node_modules: {e}")
+
+        # Check if npm is accessible
+        npm_check_path = project_dir / "npm_check.log"
+        try:
+            with open(npm_check_path, "w") as npm_check_log:
+                subprocess.run(["npm", "--version"], stdout=npm_check_log, stderr=subprocess.STDOUT, check=True)
+        except subprocess.CalledProcessError as e:
+            with open(npm_check_path, "a") as npm_check_log:
+                npm_check_log.write(f"\n[ERROR] npm check failed with return code {e.returncode}\n")
+        # Ensure npm errors are logged explicitly
+        try:
+            subprocess.run(["npm", "--version"], check=True)
+        except Exception as e:
+            print(f"[ERROR] npm command failed: {e}")
+
+        # Log npm install output to debug issues
+        npm_log_path = project_dir / "npm_debug.log"
+        try:
+            with open(npm_log_path, "w") as npm_log:
+                subprocess.run(["npm", "install"], cwd=str(lib_path / "webui"), stdout=npm_log, stderr=subprocess.STDOUT, check=True)
+        except subprocess.CalledProcessError as e:
+            with open(npm_log_path, "a") as npm_log:
+                npm_log.write(f"\n[ERROR] npm install failed with return code {e.returncode}\n")
+
+        # Debugging: Log current working directory and environment variables
+        with open(project_dir / "wrapper_debug.log", "a") as debug_log:
+            debug_log.write("[DEBUG] Wrapper script started\n")
+            debug_log.write(f"Current working directory: {os.getcwd()}\n")
+            debug_log.write("Environment variables:\n")
+            for key, value in env_vars.items():
+                debug_log.write(f"{key}={value}\n")
 
         result = subprocess.run([sys.executable, str(precompile_script)], 
                                 capture_output=False, 
