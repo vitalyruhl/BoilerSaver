@@ -43,6 +43,13 @@ void LoggerSetupSerial()
     {
         delay(50); // wait for serial port to connect. Needed for native USB port only
     }
+    // Adjust runtime log verbosity based on compile-time flag
+    // If CM_ENABLE_VERBOSE_LOGGING is defined via build_flags, elevate to DEBUG to see library messages
+#ifdef CM_ENABLE_VERBOSE_LOGGING
+    currentLogLevel = SIGMALOG_DEBUG;
+#else
+    currentLogLevel = SIGMALOG_INFO;
+#endif
     sl->Debug("Serial started!");
     sll->Debug("LCD started!");
     ConfigManagerClass::setLogger(cbMyConfigLogger); // Set the logger for the ConfigManager

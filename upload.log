@@ -1,0 +1,70 @@
+Processing usb (platform: espressif32; board: nodemcu-32s; framework: arduino; upload_port: COM[5]; monitor_speed: 115200; build_unflags: -std=gnu++11; build_flags: -DUNIT_TEST, -Wno-deprecated-declarations, -std=gnu++17, -DCM_EMBED_WEBUI=1, -DCM_ENABLE_WS_PUSH=1, -DCM_ENABLE_SYSTEM_PROVIDER=1, -DCM_ENABLE_OTA=1, -DCM_ENABLE_RUNTIME_BUTTONS=1, -DCM_ENABLE_RUNTIME_CHECKBOXES=0, -DCM_ENABLE_RUNTIME_STATE_BUTTONS=1, -DCM_ENABLE_RUNTIME_ANALOG_SLIDERS=0, -DCM_ENABLE_RUNTIME_ALARMS=1, -DCM_ENABLE_RUNTIME_NUMBER_INPUTS=0, -DCM_ENABLE_STYLE_RULES=0, -DCM_ENABLE_USER_CSS=1, -DCM_ENABLE_LOGGING=0, -DCM_ENABLE_VERBOSE_LOGGING=0, -DCONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE=1, -DCONFIG_ESP32_BROWNOUT_DET_LVL0=1; lib_deps: esphome/ESPAsyncWebServer-esphome@^3.2.2, esphome/AsyncTCP-esphome@^2.0.3, knolleary/PubSubClient@^2.8, adafruit/Adafruit SSD1306@^2.5.13, paulstoffregen/OneWire@^2.3.7, milesburton/DallasTemperature@^3.11.0, sigmashig/SigmaLogger@^0.1.0, C:\Daten\_Codding\ESP32\ConfigurationsManager; test_ignore: src/main.cpp; extra_scripts: pre:.pio/libdeps/usb/ESP32 Configuration Manager/tools/precompile_wrapper.py)
+--------------------------------------------------------------------------------
+[precompile_wrapper] Starting ESP32 Configuration Manager precompile...
+[precompile_wrapper] Running ESP32 Configuration Manager precompile script for env 'usb'...
+[precompile_wrapper] Library path: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager
+[precompile_wrapper] Script path: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager\tools\preCompile_script.py
+[precompile_wrapper] Original CWD: C:\Daten\_Codding\ESP32\BoilerSaver
+[precompile_wrapper] Propagating 19 build flags
+[precompile_wrapper] Found ENCRYPTION_SALT in src/salt.h (length: 31)
+[precompile_wrapper] Changed CWD to: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager
+[precompile_wrapper] Running: C:\Users\Vital\AppData\Local\Programs\Python\Python313\python.exe C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager\tools\preCompile_script.py
+[precompile_wrapper] Debug: Checking if SCons environment is available...
+[precompile_wrapper] SCons environment detected.
+[precompile_wrapper] Current working directory: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager
+[precompile_wrapper] Environment variables: environ({'ALLUSERSPROFILE': 'C:\\ProgramData', 'APPDATA': 'C:\\Users\\Vital\\AppData\\Roaming', 'CHOCOLATEYINSTALL': 'C:\\Users\\Vital\\AppData\\Local\\UniGetUI\\Chocolatey', 'CHROME_CRASHPAD_PIPE_NAME': '\\\\.\\pipe\\crashpad_1688_LGPWATGOUGGGJXQP', 'COMMONPROGRAMFILES': 'C:\\Program Files\\Common Files', 'COMMONPROGRAMFILES(X86)': 'C:\\Program Files (x86)\\Common Files', 'COMMONPROGRAMW6432': 'C:\\Program Files\\Common Files', 'COMPUTERNAME': 'VIVIL-HPC', 'COMSPEC': 'C:\\WINDOWS\\system32\\cmd.exe', 'DESKTOP_CONNECTOR_DIR': 'C:\\Program Files\\Autodesk\\Desktop Connector\\', 'DRIVERDATA': 'C:\\Windows\\System32\\Drivers\\DriverData', 'EFC_14808_1592913036': '1', 'HOMEDRIVE': 'C:', 'HOMEPATH': '\\Users\\Vital', 'LOCALAPPDATA': 'C:\\Users\\Vital\\AppData\\Local', 'LOGONSERVER': '\\\\VIVIL-HPC', 'NUMBER_OF_PROCESSORS': '20', 'ONEDRIVE': 'C:\\Users\\Vital\\OneDrive', 'ONEDRIVECONSUMER': 'C:\\Users\\Vital\\OneDrive', 'ORIGINAL_XDG_CURRENT_DESKTOP': 'undefined', 'OS': 'Windows_NT', 'PATH': 'C:\\Users\\Vital\\.platformio\\packages\\toolchain-xtensa-esp32\\bin;C:\\Users\\Vital\\.platformio\\packages\\tool-openocd-esp32\\bin;C:\\Users\\Vital\\.platformio\\packages\\tool-mkspiffs;C:\\Users\\Vital\\.platformio\\packages\\tool-mklittlefs;C:\\Users\\Vital\\.platformio\\packages\\tool-mkfatfs;C:\\Users\\Vital\\.platformio\\packages\\tool-esptoolpy;C:\\Program Files\\PowerShell\\7;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\PuTTY\\;C:\\Program Files (x86)\\Bitvise SSH Client;C:\\Program Files\\Git\\cmd;C:\\Program Files\\nodejs\\;C:\\Program Files (x86)\\PDFtk Server\\bin\\;C:\\Program Files\\dotnet\\;C:\\Users\\Vital\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\;C:\\Users\\Vital\\AppData\\Local\\Programs\\Python\\Python313\\;C:\\Users\\Vital\\AppData\\Local\\Programs\\Python\\Launcher\\;C:\\Users\\Vital\\AppData\\Local\\UniGetUI\\Chocolatey\\bin;C:\\Users\\Vital\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\Vital\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\Vital\\AppData\\Local\\GitHubDesktop\\bin;C:\\Users\\Vital\\AppData\\Roaming\\npm;c:\\Users\\Vital\\AppData\\Roaming\\Code\\User\\globalStorage\\github.copilot-chat\\debugCommand', 'PATHEXT': '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL', 'POWERSHELL_DISTRIBUTION_CHANNEL': 'MSI:Windows 10 Pro', 'PROCESSOR_ARCHITECTURE': 'AMD64', 'PROCESSOR_IDENTIFIER': 'Intel64 Family 6 Model 165 Stepping 5, GenuineIntel', 'PROCESSOR_LEVEL': '6', 'PROCESSOR_REVISION': 'a505', 'PROGRAMDATA': 'C:\\ProgramData', 'PROGRAMFILES': 'C:\\Program Files', 'PROGRAMFILES(X86)': 'C:\\Program Files (x86)', 'PROGRAMW6432': 'C:\\Program Files', 'PSMODULEPATH': 'C:\\Users\\Vital\\Documents\\PowerShell\\Modules;C:\\Program Files\\PowerShell\\Modules;c:\\program files\\powershell\\7\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules;C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\Modules', 'PUBLIC': 'C:\\Users\\Public', 'PYTHONIOENCODING': 'utf-8', 'SESSIONNAME': 'Console', 'SYSTEMDRIVE': 'C:', 'SYSTEMROOT': 'C:\\WINDOWS', 'TEMP': 'C:\\Users\\Vital\\AppData\\Local\\Temp', 'TMP': 'C:\\Users\\Vital\\AppData\\Local\\Temp', 'USERDOMAIN': 'VIVIL-HPC', 'USERDOMAIN_ROAMINGPROFILE': 'VIVIL-HPC', 'USERNAME': 'Vital', 'USERPROFILE': 'C:\\Users\\Vital', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'WINDIR': 'C:\\WINDOWS', 'GIT_PAGER': 'cat', 'TERM_PROGRAM': 'vscode', 'TERM_PROGRAM_VERSION': '1.105.1', 'LANG': 'en_US.UTF-8', 'COLORTERM': 'truecolor', 'GIT_ASKPASS': 'c:\\Users\\Vital\\AppData\\Local\\Programs\\Microsoft VS Code\\resources\\app\\extensions\\git\\dist\\askpass.sh', 'VSCODE_GIT_ASKPASS_NODE': 'C:\\Users\\Vital\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'VSCODE_GIT_ASKPASS_MAIN': 'c:\\Users\\Vital\\AppData\\Local\\Programs\\Microsoft VS Code\\resources\\app\\extensions\\git\\dist\\askpass-main.js', 'VSCODE_GIT_IPC_HANDLE': '\\\\.\\pipe\\vscode-git-0da5629f0e-sock', 'VSCODE_INJECTION': '1'})
+[precompile_wrapper] Calculated library path: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager
+[precompile_wrapper] Expected precompile script path: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager\tools\preCompile_script.py
+[precompile_wrapper] Checking if node_modules exists at: C:\Daten\_Codding\ESP32\BoilerSaver\.pio\libdeps\usb\ESP32 Configuration Manager\webui\node_modules
+[precompile_wrapper] node_modules folder exists. Skipping npm install.
+
+up to date, audited 195 packages in 849ms
+
+84 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> esp32-config-webui@2.3.0 build
+> vite build
+
+vite v7.1.12 building for production...
+transforming...
+Exception in thread Thread-2 (run):
+Traceback (most recent call last):
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\platformio\proc.py", line 48, in run
+    self.do_reading()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\platformio\proc.py", line 103, in do_reading
+    self.line_callback(line)
+    ~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\platformio\platform\_run.py", line 138, in _on_stdout_line
+    self._echo_line(line, level=1)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\platformio\platform\_run.py", line 159, in _echo_line
+    click.secho(line, fg=fg, err=level > 1, nl=False)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\platformio\__main__.py", line 90, in <lambda>
+    click.secho = lambda *args, **kwargs: _safe_echo(1, *args, **kwargs)
+                                          ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\platformio\__main__.py", line 83, in _safe_echo
+    click_echo_origin[origin](*args, **kwargs)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\click\termui.py", line 634, in secho
+    return echo(message, file=file, nl=nl, err=err, color=color)
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\site-packages\click\utils.py", line 318, in echo
+    file.write(out)  # type: ignore
+    ~~~~~~~~~~^^^^^
+  File "C:\Users\Vital\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 0: character maps to <undefined>
+Warning: Ignored `ESPAsyncTCP-esphome` dependency for `ESPAsyncWebServer-esphome` library
+Warning: Ignored `Hash` dependency for `ESPAsyncWebServer-esphome` library
+Warning: Ignored `ESP8266WiFi` dependency for `ESPAsyncWebServer-esphome` library

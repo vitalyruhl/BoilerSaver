@@ -59,10 +59,9 @@ void onWiFiAPMode();
 #pragma region configuration variables
 
 static const char GLOBAL_THEME_OVERRIDE[] PROGMEM = R"CSS(
-h3 { color: orange; text-decoration: underline; }
-.rw[data-group="sensors"][data-key="temp"] .lab{ color:rgba(16, 23, 198, 1);font-weight:900;font-size: 1.2rem;}
-.rw[data-group="sensors"][data-key="temp"] .val{ color:rgba(16, 23, 198, 1);font-weight:900;font-size: 1.2rem;}
-.rw[data-group="sensors"][data-key="temp"] .un{ color:rgba(16, 23, 198, 1);font-weight:900;font-size: 1.2rem;}
+.rw[data-group="Boiler"][data-key="Bo_Temp"]  .lab{ color:rgba(150, 2, 10, 1);font-weight:900;font-size: 1.2rem;}
+.rw[data-group="Boiler"][data-key="Bo_Temp"] .val{ color:rgba(150, 2, 10, 1);font-weight:900;font-size: 1.2rem;}
+.rw[data-group="Boiler"][data-key="Bo_Temp"] .un{ color:rgba(150, 2, 10, 1);font-weight:900;font-size: 1.2rem;}
 )CSS";
 
 Helpers helpers;
@@ -119,11 +118,12 @@ void setup()
     // currentLogLevel = SIGMALOG_DEBUG; //overwrite the default SIGMALOG_INFO level to debug to see all messages
     sl->Info("[SETUP] System setup start...");
 
-    ConfigManager.setAppName(APP_NAME);                                                   // Set an application name, used for SSID in AP mode and as a prefix for the hostname
+    ConfigManager.setAppName(APP_NAME);
+    ConfigManager.setVersion(APP_VERSION);                                                  // Set an application name, used for SSID in AP mode and as a prefix for the hostname
     ConfigManager.setCustomCss(GLOBAL_THEME_OVERRIDE, sizeof(GLOBAL_THEME_OVERRIDE) - 1); // Register global CSS override
     ConfigManager.enableBuiltinSystemProvider();                                          // enable the builtin system provider (uptime, freeHeap, rssi etc.)
     ConfigManager.setSettingsPassword(SETTINGS_PASSWORD);
-    
+
     sl->Info("[SETUP] Load configuration...");
     initializeAllSettings(); // Register all settings BEFORE loading
 

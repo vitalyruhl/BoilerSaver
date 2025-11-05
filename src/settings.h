@@ -10,8 +10,8 @@
 
 #include "ConfigManager.h"
 
-#define VERSION "1.1.0"           // version of the software (major.minor.patch)
-#define VERSION_DATE "04.11.2025" // date of the version
+#define APP_VERSION "1.1.0"           // version of the software (major.minor.patch)
+#define VERSION_DATE "05.11.2025" // date of the version
 #define APP_NAME "Boiler-Saver" // name of the application, used for SSID in AP mode and as a prefix for the hostname
 
 // Watchdog timeout remains compile-time constant
@@ -310,7 +310,7 @@ struct SystemSettings {
             .defaultValue = 5,
             .showInWeb = true
         }),
-        version(ConfigOptions<String>{.key = "P_Version", .name = "Program Version", .category = "System", .defaultValue = String(VERSION)})
+        version(ConfigOptions<String>{.key = "P_Version", .name = "Program Version", .category = "System", .defaultValue = String(APP_VERSION)})
     {
         // Settings registration moved to initializeAllSettings()
     }
