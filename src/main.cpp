@@ -37,11 +37,11 @@ void ShowDisplay();
 void ShowDisplayOff();
 void updateStatusLED();
 void PinSetup();
-void handeleBoilerState(bool forceON = false);
 void UpdateBoilerAlarmState();
 static void cb_readTempSensor();
 static void setupTempSensor();
 static void handleShowerRequest(bool requested);
+void handeleBoilerState(bool forceON = false, bool forceCheck = false);
 
 // Shorthand helper for RuntimeManager access
 static inline ConfigManagerRuntime& CRM() { return ConfigManager.getRuntimeManager(); }
@@ -91,7 +91,8 @@ static bool sensorFaultState = false; // Global alarm state for sensor fault mon
 
 static unsigned long lastDisplayUpdate = 0; // Non-blocking display update management
 static const unsigned long displayUpdateInterval = 100; // Update display every 100ms
-static const unsigned long resetHoldDurationMs = 3000; // Require 3s hold to factory reset
+static const unsigned long resetHoldDurationMs = 10000; // Require 10s hold to factory reset
+
 // DS18B20 globals
 static OneWire* oneWireBus = nullptr;
 static DallasTemperature* ds18 = nullptr;
@@ -123,7 +124,7 @@ void setup()
     ConfigManager.setCustomCss(GLOBAL_THEME_OVERRIDE, sizeof(GLOBAL_THEME_OVERRIDE) - 1); // Register global CSS override
     ConfigManager.enableBuiltinSystemProvider();                                          // enable the builtin system provider (uptime, freeHeap, rssi etc.)
     ConfigManager.setSettingsPassword(SETTINGS_PASSWORD);
-    
+
     sl->Info("[SETUP] Load configuration...");
     initializeAllSettings(); // Register all settings BEFORE loading
 
@@ -153,7 +154,7 @@ void setup()
     SetupCheckForResetButton();
     SetupCheckForAPModeButton();
 
-    
+
     //----------------------------------------------------------------------------------------------------------------------------------
     // Configure Smart WiFi Roaming with default values (can be customized in setup if needed)
     ConfigManager.enableSmartRoaming(true);            // Re-enabled now that WiFi stack is fixed
@@ -208,7 +209,7 @@ void loop()
     CheckButtons();
     boilerState = Relays::getBoiler(); // get Relay state
 
-    
+
     //-------------------------------------------------------------------------------------------------------------
     // for working with the ConfigManager nessesary in loop
     ConfigManager.updateLoopTiming(); // Update internal loop timing metrics for system provider
@@ -268,6 +269,81 @@ void loop()
     Blinker::loopAll();      // Advance all blinker state machines
     delay(10); // Small delay
 }
+
+
+//----------------------------------------
+// Shower request handler (UI/MQTT helper)
+//----------------------------------------
+static void handleShowerRequest(bool v)
+{
+    willShowerRequested = v;
+    if (v) {
+        if (boilerTimeRemaining <= 0) {
+            int mins = boilerSettings.boilerTimeMin.get();
+            if (mins <= 0) mins = 60;
+            boilerTimeRemaining = mins * 60;
+        }
+
+    } else {
+        boilerTimeRemaining = 0;
+    }
+    handleBoilerState(false, true); // Force check
+}
+
+
+void handleBoilerState(bool forceON, bool forceCheck)
+{
+    static unsigned long lastBoilerCheck = 0;
+    unsigned long now = millis();
+
+    if (now - lastBoilerCheck >= 1000 || forceCheck) // Check every second
+    {
+        lastBoilerCheck = now;
+        const bool stopOnTarget = boilerSettings.stopTimerOnTarget.get();
+        const bool wasOn = Relays::getBoiler();
+        const int prevTime = boilerTimeRemaining;
+
+        // Temperature-based auto control: turn off when upper threshold reached, allow turn-on when below lower threshold
+        if (wasOn) {
+            if (temperature >= boilerSettings.offThreshold.get()) {
+                Relays::setBoiler(false);
+                if (stopOnTarget) {
+                    boilerTimeRemaining = 0;
+                    if (willShowerRequested) {
+                        willShowerRequested = false;
+                        if (mqttManager.isConnected()) {
+                            mqttManager.publish(mqttSettings.topicWillShower.c_str(), "0", true);
+                        }
+                    }
+                }
+            }
+        } else {
+            if ((boilerSettings.enabled.get() || forceON) && (temperature <= boilerSettings.onThreshold.get()) && (boilerTimeRemaining > 0)) {
+                Relays::setBoiler(true);
+            }
+        }
+
+        if (boilerTimeRemaining > 0)
+        {
+            boilerTimeRemaining--; // count down in seconds
+        }
+
+        // Detect timer end transition to 0 -> clear WillShower and publish retained OFF
+        if (prevTime > 0 && boilerTimeRemaining <= 0) {
+            if (willShowerRequested) {
+                willShowerRequested = false;
+                if (mqttManager.isConnected()) {
+                    mqttManager.publish(mqttSettings.topicWillShower.c_str(), "0", true);
+                }
+            }
+            if (Relays::getBoiler()) {
+                Relays::setBoiler(false);
+            }
+        }
+    }
+}
+
+
 
 //----------------------------------------
 // PROJECT FUNCTIONS
@@ -445,80 +521,6 @@ void UpdateBoilerAlarmState()
     }
 }
 
-void handeleBoilerState(bool forceON)
-{
-    static unsigned long lastBoilerCheck = 0;
-    unsigned long now = millis();
-
-    if (now - lastBoilerCheck >= 1000) // Check every second
-    {
-        lastBoilerCheck = now;
-        const bool stopOnTarget = boilerSettings.stopTimerOnTarget.get();
-        const bool wasOn = Relays::getBoiler();
-        const int prevTime = boilerTimeRemaining;
-
-        // Temperature-based auto control: turn off when upper threshold reached, allow turn-on when below lower threshold
-        if (Relays::getBoiler()) {
-            if (temperature >= boilerSettings.offThreshold.get()) {
-                Relays::setBoiler(false);
-                if (stopOnTarget) {
-                    boilerTimeRemaining = 0;
-                    if (willShowerRequested) {
-                        willShowerRequested = false;
-                        if (mqttManager.isConnected()) {
-                            mqttManager.publish(mqttSettings.topicWillShower.c_str(), "0", true);
-                        }
-                    }
-                }
-            }
-        } else {
-            if ((boilerSettings.enabled.get() || forceON) && (temperature <= boilerSettings.onThreshold.get()) && (boilerTimeRemaining > 0)) {
-                Relays::setBoiler(true);
-            }
-        }
-
-
-        if (boilerSettings.enabled.get() || forceON)
-        {
-            if (boilerTimeRemaining > 0)
-            {
-                if (!Relays::getBoiler())
-                {
-                    Relays::setBoiler(true); // Turn on the boiler
-                }
-                boilerTimeRemaining--; // count down in seconds
-            }
-            else
-            {
-                if (Relays::getBoiler())
-                {
-                    Relays::setBoiler(false); // Turn off the boiler
-                }
-            }
-        }
-        else
-        {
-            if (Relays::getBoiler())
-            {
-                Relays::setBoiler(false); // Turn off the boiler if disabled
-            }
-        }
-
-        // Detect timer end transition to 0 -> clear WillShower and publish retained OFF
-        if (prevTime > 0 && boilerTimeRemaining <= 0) {
-            if (willShowerRequested) {
-                willShowerRequested = false;
-                if (mqttManager.isConnected()) {
-                    mqttManager.publish(mqttSettings.topicWillShower.c_str(), "0", true);
-                }
-            }
-            if (Relays::getBoiler()) {
-                Relays::setBoiler(false);
-            }
-        }
-    }
-}
-
 void PinSetup()
 {
     analogReadResolution(12); // Use full 12-bit resolution
@@ -530,7 +532,6 @@ void PinSetup()
     Relays::initPins();
     Relays::setBoiler(false); // Force known OFF state
 }
-
 
 static void cb_readTempSensor() {
     if (!ds18) {
@@ -617,6 +618,7 @@ static void setupTempSensor() {
     if (intervalSec < 1.0f) intervalSec = 30.0f;
     TempReadTicker.attach(intervalSec, cb_readTempSensor);
     sl->Printf("[TEMP] DS18B20 initialized on GPIO %d, interval %.1fs, offset %.2f°C", pin, intervalSec, tempSensorSettings.corrOffset.get()).Info();
+    cb_readTempSensor(); // Initial read
 }
 
 //----------------------------------------
@@ -1022,8 +1024,16 @@ void CheckButtons()
     bool currentResetState = digitalRead(buttonSettings.resetDefaultsPin.get());
     bool currentAPState = digitalRead(buttonSettings.apModePin.get());
     bool currentShowerState = HIGH;
+
     if (buttonSettings.showerRequestPin.get() > 0) {
         currentShowerState = digitalRead(buttonSettings.showerRequestPin.get());
+        if (lastShowerButtonState == HIGH && currentShowerState == LOW) {
+            bool newState = !willShowerRequested; // Toggle the shower request state
+            sl->Printf("[MAIN] Shower button pressed -> toggling shower request to %s", newState ? "ON" : "OFF").Debug();
+            ShowDisplay();
+            handleShowerRequest(newState);
+        }
+        lastShowerButtonState = currentShowerState;
     }
 
     // Check for button press (transition from HIGH to LOW)
@@ -1037,18 +1047,6 @@ void CheckButtons()
     {
         sl->Debug("[MAIN] AP-Mode-Button pressed -> Start Display Ticker...");
         ShowDisplay();
-    }
-
-    // Shower request press (toggle on/off)
-    if (buttonSettings.showerRequestPin.get() > 0) {
-        if (lastShowerButtonState == HIGH && currentShowerState == LOW) {
-            // Toggle the shower request state
-            bool newState = !willShowerRequested;
-            sl->Printf("[MAIN] Shower button pressed -> toggling shower request to %s", newState ? "ON" : "OFF").Debug();
-            ShowDisplay();
-            handleShowerRequest(newState);
-        }
-        lastShowerButtonState = currentShowerState;
     }
 
     lastResetButtonState = currentResetState;
@@ -1340,29 +1338,3 @@ void onWiFiAPMode()
     }
 }
 
-//----------------------------------------
-// Shower request handler (UI/MQTT helper)
-//----------------------------------------
-static void handleShowerRequest(bool v)
-{
-    willShowerRequested = v;
-    if (v) {
-        if (boilerTimeRemaining <= 0) {
-            int mins = boilerSettings.boilerTimeMin.get();
-            if (mins <= 0) mins = 60;
-            boilerTimeRemaining = mins * 60;
-        }
-        Relays::setBoiler(true);
-        ShowDisplay();
-        if (mqttManager.isConnected()) {
-            mqttManager.publish(mqttSettings.topicWillShower.c_str(), "1", true);
-        }
-    } else {
-        // user canceled
-        boilerTimeRemaining = 0;
-        Relays::setBoiler(false);
-        if (mqttManager.isConnected()) {
-            mqttManager.publish(mqttSettings.topicWillShower.c_str(), "0", true);
-        }
-    }
-}
