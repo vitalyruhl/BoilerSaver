@@ -133,10 +133,24 @@ struct TempSensorSettings {
     }
 };
 
+struct WiFiUiSettings {
+    Config<String> *apMacPriority = nullptr;
+
+    void create()
+    {
+        apMacPriority = &ConfigManager.addSettingString("WiFiMacPr")
+                             .name("Preferred AP MAC (optional)")
+                             .category("WiFi")
+                             .defaultValue(String(""))
+                             .build();
+    }
+};
+
 extern I2CSettings i2cSettings;
 extern DisplaySettings displaySettings;
 extern TempSensorSettings tempSensorSettings;
 extern BoilerSettings boilerSettings;
+extern WiFiUiSettings wifiUiSettings;
 
 // Function to register all settings with ConfigManager
 // This must be called after ConfigManager is properly initialized
