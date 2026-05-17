@@ -7,8 +7,8 @@
 
 #include "ConfigManager.h"
 
-#define APP_VERSION "4.0.0"
-#define VERSION_DATE "05.11.2025"
+#define APP_VERSION "4.0.3"
+#define VERSION_DATE "17.05.2026"
 #ifndef APP_NAME
 #define APP_NAME "Boiler-Saver"
 #endif
