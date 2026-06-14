@@ -47,7 +47,9 @@ static void setupGUI();
 static void setupMQTT();
 static void updateMqttTopics();
 static void setupMqttCallbacks();
+static void subscribeMqttTopics();
 static void handleMqttMessage(const char *topic, const uint8_t *payload, unsigned int length);
+static void publishMqttSettings();
 static void publishMqttState(bool retained);
 static void publishMqttStateIfNeeded();
 static void registerIOBindings();
@@ -143,7 +145,6 @@ static OneWire *oneWireBus = nullptr;
 static DallasTemperature *ds18 = nullptr;
 static bool youCanShowerNow = false;           // derived status for MQTT/UI
 static bool willShowerRequested = false;       // unified flag for UI+MQTT 'I will shower'
-static bool didStartupMQTTPropagate = false;   // ensure one-time retained propagation
 static long lastYouCanShower1PeriodId = -1;    // period id when we last published a '1'
 static bool lastPublishedYouCanShower = false; // track last published state to allow publishing 0 transitions
 // MQTT status monitoring
@@ -749,11 +750,7 @@ static void updateMqttTopics()
         base = String(APP_NAME); // Base-Fallback
     }
 
-    if (base != mqttBaseTopic)
-    {
-        mqttBaseTopic = base;
-        didStartupMQTTPropagate = false;
-    }
+    mqttBaseTopic = base;
 
     topicActualState = mqttBaseTopic + "/ActualState";
     topicActualBoilerTemp = mqttBaseTopic + "/TemperatureBoiler";
@@ -818,6 +815,32 @@ static void setupMqttCallbacks()
         lastPublishedYouCanShower = false; });
 }
 
+static void subscribeMqttTopics()
+{
+    lmg.scopedTag("subscribeMqttTopics");
+
+    if (!topicSetShowerTime.isEmpty())
+        mqtt.subscribe(topicSetShowerTime.c_str());
+    if (!topicWillShower.isEmpty())
+        mqtt.subscribe(topicWillShower.c_str());
+    if (!topicBoilerEnabled.isEmpty())
+        mqtt.subscribe(topicBoilerEnabled.c_str());
+    if (!topicOnThreshold.isEmpty())
+        mqtt.subscribe(topicOnThreshold.c_str());
+    if (!topicOffThreshold.isEmpty())
+        mqtt.subscribe(topicOffThreshold.c_str());
+    if (!topicBoilerTimeMin.isEmpty())
+        mqtt.subscribe(topicBoilerTimeMin.c_str());
+    if (!topicStopTimerOnTarget.isEmpty())
+        mqtt.subscribe(topicStopTimerOnTarget.c_str());
+    if (!topicOncePerPeriod.isEmpty())
+        mqtt.subscribe(topicOncePerPeriod.c_str());
+    if (!topicYouCanShowerPeriodMin.isEmpty())
+        mqtt.subscribe(topicYouCanShowerPeriodMin.c_str());
+    if (!topicSave.isEmpty())
+        mqtt.subscribe(topicSave.c_str());
+}
+
 // Compute current period ID for once-per-period gating
 static long getCurrentPeriodId()
 {
@@ -829,6 +852,24 @@ static long getCurrentPeriodId()
         return now / periodSec;
     }
     return (long)((millis() / 1000UL) / periodSec);
+}
+
+static void publishMqttSettings()
+{
+    lmg.scopedTag("publishMqttSettings");
+    if (!mqtt.isConnected() || mqttBaseTopic.isEmpty())
+    {
+        return;
+    }
+
+    mqtt.publish(topicBoilerEnabled.c_str(), boilerSettings.enabled->get() ? "1" : "0", true);
+    mqtt.publish(topicOnThreshold.c_str(), String(boilerSettings.onThreshold->get()), true);
+    mqtt.publish(topicOffThreshold.c_str(), String(boilerSettings.offThreshold->get()), true);
+    mqtt.publish(topicBoilerTimeMin.c_str(), String(boilerSettings.boilerTimeMin->get()), true);
+    mqtt.publish(topicYouCanShowerPeriodMin.c_str(), String(boilerSettings.boilerTimeMin->get()), true);
+    mqtt.publish(topicStopTimerOnTarget.c_str(), boilerSettings.stopTimerOnTarget->get() ? "1" : "0", true);
+    mqtt.publish(topicOncePerPeriod.c_str(), boilerSettings.onlyOncePerPeriod->get() ? "1" : "0", true);
+    mqtt.publish(topicWillShower.c_str(), willShowerRequested ? "1" : "0", true);
 }
 
 static void publishMqttState(bool retained)
@@ -853,7 +894,16 @@ static void publishMqttState(bool retained)
 
     const bool canShower = (temperature >= boilerSettings.offThreshold->get()) && getBoilerState();
     youCanShowerNow = canShower;
-    if (!boilerSettings.onlyOncePerPeriod->get())
+    if (retained)
+    {
+        mqtt.publish(topicYouCanShowerNow.c_str(), canShower ? "1" : "0", true);
+        lastPublishedYouCanShower = canShower;
+        if (canShower)
+        {
+            lastYouCanShower1PeriodId = getCurrentPeriodId();
+        }
+    }
+    else if (!boilerSettings.onlyOncePerPeriod->get())
     {
         mqtt.publish(topicYouCanShowerNow.c_str(), canShower ? "1" : "0", retained);
         lastPublishedYouCanShower = canShower;
@@ -1090,31 +1140,9 @@ namespace cm
         updateMqttTopics();
         lmg.log(LL::Info, "Connected");
 
-        if (!topicSetShowerTime.isEmpty())
-            mqtt.subscribe(topicSetShowerTime.c_str());
-        if (!topicWillShower.isEmpty())
-            mqtt.subscribe(topicWillShower.c_str());
-        if (!topicBoilerEnabled.isEmpty())
-            mqtt.subscribe(topicBoilerEnabled.c_str());
-        if (!topicOnThreshold.isEmpty())
-            mqtt.subscribe(topicOnThreshold.c_str());
-        if (!topicOffThreshold.isEmpty())
-            mqtt.subscribe(topicOffThreshold.c_str());
-        if (!topicStopTimerOnTarget.isEmpty())
-            mqtt.subscribe(topicStopTimerOnTarget.c_str());
-        if (!topicOncePerPeriod.isEmpty())
-            mqtt.subscribe(topicOncePerPeriod.c_str());
-        if (!topicYouCanShowerPeriodMin.isEmpty())
-            mqtt.subscribe(topicYouCanShowerPeriodMin.c_str());
-        if (!topicSave.isEmpty())
-            mqtt.subscribe(topicSave.c_str());
-
-        if (!didStartupMQTTPropagate)
-        {
-            publishMqttState(true);
-            didStartupMQTTPropagate = true;
-        }
-        publishMqttState(false);
+        publishMqttSettings();
+        publishMqttState(true);
+        subscribeMqttTopics();
     }
 
     void onMQTTDisconnected()
