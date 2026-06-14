@@ -7,3 +7,8 @@
 /ideas
 secrets.h
 /__Temp/*
+
+# Serena: keep .serena/project.yml tracked; ignore local runtime state.
+/.serena/cache/
+/.serena/memories/
+/.serena/project.local.yml
