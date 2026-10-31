@@ -69,6 +69,10 @@ static void applyTempReadInterval();
 static void handleShowerRequest(bool requested);
 static void setupNetworkDefaults();
 static void applyWiFiMacPriority();
+#if BOILERSAVER_BENCH_TEST
+static void setupBenchIsolation();
+static void publishBenchDiagnostics();
+#endif
 
 //--------------------------------------------------------------------------------------------------------------
 
@@ -82,7 +86,13 @@ static const char GLOBAL_THEME_OVERRIDE[] PROGMEM = R"CSS(
 // static const char SETTINGS_PASSWORD[] = "";
 
 // Built-in LED pulse helper for WiFi status patterns.
+#if !BOILERSAVER_BENCH_TEST || BOILERSAVER_BENCH_FULL_IO
+#if BOILERSAVER_BENCH_FULL_IO
+static cm::helpers::PulseOutput buildinLED(26, cm::helpers::PulseOutput::ActiveLevel::ActiveHigh);
+#else
 static cm::helpers::PulseOutput buildinLED(LED_BUILTIN, cm::helpers::PulseOutput::ActiveLevel::ActiveHigh);
+#endif
+#endif
 
 static cm::LoggingManager &lmg = cm::LoggingManager::instance();
 using LL = cm::LoggingManager::Level;
@@ -97,7 +107,11 @@ static cm::CoreWiFiSettings &wifiSettings = coreSettings.wifi;
 static cm::MQTTManager::Settings &mqttSettings = mqtt.settings();
 static cm::CoreWiFiServices wifiServices;
 
+#if BOILERSAVER_BENCH_FULL_IO
+static Adafruit_SSD1306 display(-1); // Four-pin I2C fixture module has no reset connection.
+#else
 static Adafruit_SSD1306 display(4);
+#endif
 
 static constexpr char IO_BOILER_ID[] = "boiler";
 static constexpr char IO_RESET_ID[] = "reset_btn";
@@ -150,6 +164,15 @@ static bool lastPublishedYouCanShower = false; // track last published state to 
 // MQTT status monitoring
 static unsigned long lastMqttStatusLog = 0;
 static bool lastMqttConnectedState = false;
+#if BOILERSAVER_BENCH_FULL_IO
+static volatile uint32_t benchSensorCallbacks = 0;
+static volatile uint32_t benchSensorCompletions = 0;
+static volatile uint32_t benchDisplayOffCallbacks = 0;
+static int benchDisplayProbeStatus = -1;
+static bool benchDisplayInitOk = false;
+static volatile bool benchSensorHasSample = false;
+static volatile float benchSensorRawC = 0.0f;
+#endif
 
 #pragma endregion configuration variables
 
@@ -182,9 +205,15 @@ void setup()
 
     ConfigManager.loadAll();
 
+#if BOILERSAVER_BENCH_TEST
+    setupBenchIsolation();
+#else
     setupNetworkDefaults();
+#endif
     mqtt.attach(ConfigManager);
+#if !BOILERSAVER_BENCH_TEST || BOILERSAVER_BENCH_FULL_IO
     ioManager.begin();
+#endif
 
     updateMqttTopics();
     setupMqttCallbacks();
@@ -208,7 +237,9 @@ void loop()
 
     ConfigManager.getWiFiManager().update();
     boilerState = getBoilerState();
+#if !BOILERSAVER_BENCH_TEST || BOILERSAVER_BENCH_FULL_IO
     ioManager.update();
+#endif
 
     ConfigManager.handleClient();
     alarmManager.update();
@@ -237,7 +268,12 @@ void loop()
 
     updateStatusLED();
 
+#if BOILERSAVER_BENCH_TEST
+    publishBenchDiagnostics();
+#endif
+#if !BOILERSAVER_BENCH_TEST || BOILERSAVER_BENCH_FULL_IO
     cm::helpers::PulseOutput::loopAll();
+#endif
 
     delay(10);
 }
@@ -261,6 +297,20 @@ void setupGUI()
     ConfigManager.addSettingsGroup("Temp Sensor", "Temp Sensor", "Temperature Sensor", 70);
     ConfigManager.addSettingsPage(cm::CoreCategories::IO, 80);
 
+#if BOILERSAVER_BENCH_TEST
+    ConfigManager.getRuntime().addRuntimeProvider("Boiler", [](JsonObject &o) {
+#if BOILERSAVER_BENCH_FULL_IO
+        o["benchProvenance"] = "[TEST] Physical DS18 GPIO18; I2C21/22; LED25 output; buttons14/33/4; no reserved relay bindings; heating disabled";
+        o["sensorDeviceCount"] = ds18 ? ds18->getDeviceCount() : 0;
+        o["sensorReadingAvailable"] = benchSensorHasSample && !sensorFaultState;
+#else
+        o["benchProvenance"] = "[MOCKED!] Fixed 70 C; simulated relay; no physical IO";
+        o["shower_btn"] = false;
+#endif
+    });
+#endif
+
+    // Named groups are evaluated only when demanded by the CM Live page.
     // add runtime values for the GUI
     ConfigManager.getRuntime().addRuntimeProvider("Boiler", [](JsonObject &o)
                                                   { o["Bo_TimeLeft"] = boilerTimeRemaining; });
@@ -276,7 +326,11 @@ void setupGUI()
 
     boilerCard.value("Bo_EN", []()
                      { return getBoilerState(); })
+#if BOILERSAVER_BENCH_FULL_IO
+        .label("Test LED25 On")
+#else
         .label("Relay On")
+#endif
         .order(2);
 
     boilerCard.value("Bo_CanShower", []()
@@ -288,7 +342,13 @@ void setupGUI()
         .order(5);
 
     boilerCard.value("Bo_Temp", []()
-                     { return temperature; })
+                     {
+#if BOILERSAVER_BENCH_FULL_IO
+                         return benchSensorHasSample && !sensorFaultState ? temperature : NAN;
+#else
+                         return temperature;
+#endif
+                     })
         .label("Temperature")
         .unit("°C")
         .precision(1)
@@ -507,6 +567,9 @@ void handeleBoilerState(bool forceON)
 
 static void cb_readTempSensor()
 {
+#if BOILERSAVER_BENCH_FULL_IO
+    ++benchSensorCallbacks;
+#endif
     lmg.scopedTag("TEMP");
     if (!ds18)
     {
@@ -515,6 +578,9 @@ static void cb_readTempSensor()
     }
     ds18->requestTemperatures();
     float t = ds18->getTempCByIndex(0);
+#if BOILERSAVER_BENCH_FULL_IO
+    benchSensorRawC = t;
+#endif
     lmg.log(LL::Debug, "Raw sensor reading: %.2f°C", t);
 
     // Check for sensor fault (-127°C indicates sensor error)
@@ -542,12 +608,23 @@ static void cb_readTempSensor()
         }
 
         temperature = t + tempSensorSettings.corrOffset->get();
+#if BOILERSAVER_BENCH_FULL_IO
+        benchSensorHasSample = true;
+#endif
         lmg.log(LL::Trace, "Temperature updated: %.2f°C (offset: %.2f°C)", temperature, tempSensorSettings.corrOffset->get());
     }
+#if BOILERSAVER_BENCH_FULL_IO
+    ++benchSensorCompletions;
+#endif
 }
 
 static void setupTempSensor()
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    temperature = 70.0f; // [MOCKED!] Fixed bench value; no DS18B20 is connected.
+    sensorFaultState = true;
+    return;
+#endif
     lmg.scopedTag("SETUP/TEMP");
     int pin = tempSensorSettings.gpioPin->get();
     if (pin <= 0)
@@ -640,17 +717,32 @@ static void setupLogging()
 
 static void registerIOBindings()
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    return; // [MOCKED!] Bench has no physical IO or display.
+#endif
     lmg.scopedTag("IO");
     analogReadResolution(12);
 
+#if BOILERSAVER_BENCH_FULL_IO
+    ioManager.addDigitalOutput(IO_BOILER_ID, "Test LED25", 25, false, true);
+#else
     ioManager.addDigitalOutput(IO_BOILER_ID, "Boiler Relay", 23, true, true);
+#endif
     ioManager.addDigitalOutputToSettingsGroup(IO_BOILER_ID, "I/O", "Boiler Relay", "Boiler Relay", 1);
 
     ioManager.addDigitalInput(IO_RESET_ID, "Reset Button", 14, true, true, false, true);
 
+#if BOILERSAVER_BENCH_FULL_IO
+    ioManager.addDigitalInput(IO_AP_ID, "Set Button", 4, true, true, false, true);
+#else
     ioManager.addDigitalInput(IO_AP_ID, "AP Mode Button", 13, true, true, false, true);
+#endif
 
+#if BOILERSAVER_BENCH_FULL_IO
+    ioManager.addDigitalInput(IO_SHOWER_ID, "Mid Button", 33, true, true, false, true);
+#else
     ioManager.addDigitalInput(IO_SHOWER_ID, "Shower Request Button", 19, true, true, false, true);
+#endif
 
     ioManager.addDigitalInputToSettingsGroup(IO_SHOWER_ID, "I/O", "Shower HW-Btn", "Shower HW-Btn", 100);
     ioManager.addDigitalInputToLive(IO_SHOWER_ID, 100, "Boiler", "Boiler", "Boiler", "Shower HW-Btn", false);
@@ -713,12 +805,20 @@ static void registerIOBindings()
 
 static void setBoilerState(bool on)
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    boilerState = on; // [MOCKED!] Logical control state only.
+#else
     ioManager.setState(IO_BOILER_ID, on);
+#endif
 }
 
 static bool getBoilerState()
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    return boilerState;
+#else
     return ioManager.getState(IO_BOILER_ID);
+#endif
 }
 
 static void setupMQTT()
@@ -1168,6 +1268,9 @@ namespace cm
 
 void WriteToDisplay()
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    return; // [MOCKED!] Bench has no physical IO or display.
+#endif
     lmg.scopedTag("DISPLAY");
     // Static variables to track last displayed values
     static float lastTemperature = -999.0;
@@ -1248,10 +1351,22 @@ void WriteToDisplay()
 
 static void SetupStartDisplay()
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    return; // [MOCKED!] Bench has no physical IO or display.
+#endif
     Wire.begin(i2cSettings.sdaPin->get(), i2cSettings.sclPin->get());
     Wire.setClock(static_cast<uint32_t>(i2cSettings.busFreq->get()));
 
+#if BOILERSAVER_BENCH_FULL_IO
+    Wire.beginTransmission(i2cSettings.displayAddr->get());
+    benchDisplayProbeStatus = Wire.endTransmission();
+    Serial.printf("[I] FullIO I2C probe status=%d (0=ACK; ACK does not identify the device)\n", benchDisplayProbeStatus);
+#endif
+#if BOILERSAVER_BENCH_FULL_IO
+    benchDisplayInitOk = display.begin(SSD1306_SWITCHCAPVCC, i2cSettings.displayAddr->get());
+#else
     display.begin(SSD1306_SWITCHCAPVCC, i2cSettings.displayAddr->get());
+#endif
     display.clearDisplay();
     display.drawRect(0, 0, 128, 24, WHITE);
     display.setTextSize(2);
@@ -1263,6 +1378,9 @@ static void SetupStartDisplay()
 
 void ShowDisplay()
 {
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    return; // [MOCKED!] No display connected.
+#endif
     displayTicker.detach();                                                 // Stop the ticker to prevent multiple calls
     display.ssd1306_command(SSD1306_DISPLAYON);                             // Turn on the display
     displayTicker.attach(displaySettings.onTimeSec->get(), ShowDisplayOff); // Reattach the ticker to turn off the display after the specified time
@@ -1271,6 +1389,12 @@ void ShowDisplay()
 
 void ShowDisplayOff()
 {
+#if BOILERSAVER_BENCH_FULL_IO
+    ++benchDisplayOffCallbacks;
+#endif
+#if BOILERSAVER_BENCH_TEST && !BOILERSAVER_BENCH_FULL_IO
+    return; // [MOCKED!] No display connected.
+#endif
     displayTicker.detach();                      // Stop the ticker to prevent multiple calls
 
     if (willShowerRequested)
@@ -1293,6 +1417,7 @@ void ShowDisplayOff()
 
 void updateStatusLED()
 {
+#if !BOILERSAVER_BENCH_TEST || BOILERSAVER_BENCH_FULL_IO
     // ------------------------------------------------------------------
     // Status LED using Blinker: select patterns based on WiFi state
     //  - AP mode: fast blink (100ms on / 100ms off)
@@ -1323,6 +1448,7 @@ void updateStatusLED()
         buildinLED.setPulseRepeat(/*count*/ 3, /*periodMs*/ 200, /*gapMs*/ 600);
         break;
     }
+#endif
 }
 
 //----------------------------------------
@@ -1482,3 +1608,114 @@ static void applyWiFiMacPriority()
     ConfigManager.setAccessPointMacPriority(preferredApMac);
     lmg.log(LL::Debug, "WiFi AP MAC priority active: %s", preferredApMac.c_str());
 }
+
+
+#if BOILERSAVER_BENCH_TEST
+static void setupBenchIsolation()
+{
+    // [MOCKED!] Override stale bench NVS before network/MQTT attachment.
+#if CM_HAS_WIFI_SECRETS
+    wifiSettings.wifiSsid.set(MY_WIFI_SSID);
+    wifiSettings.wifiPassword.set(MY_WIFI_PASSWORD);
+#if defined(MY_MQTT_BROKER_IP) && defined(MY_MQTT_BROKER_PORT)
+    mqttSettings.server.set(MY_MQTT_BROKER_IP);
+    mqttSettings.port.set(MY_MQTT_BROKER_PORT);
+#endif
+#ifdef MY_MQTT_USERNAME
+    mqttSettings.username.set(MY_MQTT_USERNAME);
+#endif
+#ifdef MY_MQTT_PASSWORD
+    mqttSettings.password.set(MY_MQTT_PASSWORD);
+#endif
+#endif
+    wifiSettings.useDhcp.set(true);
+    wifiSettings.staticIp.set("");
+    wifiUiSettings.apMacPriority->set("");
+    mqttSettings.clientId.set(BOILERSAVER_BENCH_MQTT_ROOT);
+    mqttSettings.publishTopicBase.set(BOILERSAVER_BENCH_MQTT_ROOT);
+    mqttSettings.enableMQTT.set(true);
+    systemSettings.otaPassword.set(OTA_PASSWORD);
+#if BOILERSAVER_BENCH_FULL_IO
+    // [TEST] Use the operator-confirmed fixture sensor/bus pins; no heating requests.
+    const auto setInt = [](const char* hint, int value) {
+        auto* setting = static_cast<Config<int>*>(ConfigManager.findSettingByKeyHint("I/O", hint));
+        if (!setting) {
+            Serial.printf("[E] FullIO missing pin setting %s; startup blocked\n", hint);
+            while (true) delay(1000);
+        }
+        setting->set(value);
+    };
+    const auto setBool = [](const char* hint, bool value) {
+        auto* setting = static_cast<Config<bool>*>(ConfigManager.findSettingByKeyHint("I/O", hint));
+        if (!setting) {
+            Serial.printf("[E] FullIO missing IO flag %s; startup blocked\n", hint);
+            while (true) delay(1000);
+        }
+        setting->set(value);
+    };
+    setInt("IO00P", 25);
+    setBool("IO00L", false);
+    setInt("II02P", 33);
+    setBool("II02L", true);
+    setBool("II02U", true);
+    setBool("II02D", false);
+    i2cSettings.sdaPin->set(21);
+    i2cSettings.sclPin->set(22);
+    i2cSettings.busFreq->set(400000);
+    i2cSettings.displayAddr->set(0x3C);
+    tempSensorSettings.gpioPin->set(18);
+    tempSensorSettings.corrOffset->set(0.0f);
+    tempSensorSettings.readInterval->set(10);
+    displaySettings.turnDisplayOff->set(true);
+    displaySettings.onTimeSec->set(360);
+    // Test-only idle policy prevents forceON from treating an ambient probe as a cold boiler.
+    boilerSettings.enabled->set(false);
+    boilerSettings.onThreshold->set(-1000.0f);
+    boilerSettings.offThreshold->set(80.0f);
+    boilerSettings.boilerTimeMin->set(120);
+    boilerSettings.stopTimerOnTarget->set(false);
+    boilerSettings.onlyOncePerPeriod->set(true);
+    Serial.println("[I] [TEST] Station: DS18=18 I2C=21/22 LEDout=25 StatusLED=26 Btn=14/33/4 OLEDreset=-1; heating disabled");
+#else
+    Serial.println("[I] [MOCKED!] COM8 bench: DHCP; isolated MQTT; no physical IO");
+#endif
+}
+
+static void publishBenchDiagnostics()
+{
+    static unsigned long last = 0;
+    if (millis() - last < 5000) return;
+    last = millis();
+    JsonDocument doc;
+    doc["uptime_ms"] = millis();
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["min_free_heap"] = ESP.getMinFreeHeap();
+#if BOILERSAVER_BENCH_FULL_IO
+    doc["test_output_gpio"] = 25;
+    doc["test_led_gpio_readback"] = getBoilerState();
+    doc["sensor_devices"] = ds18 ? ds18->getDeviceCount() : 0;
+    doc["sensor_reading_available"] = benchSensorHasSample && !sensorFaultState;
+    if (benchSensorHasSample && !sensorFaultState) {
+        doc["sensor_raw_c"] = benchSensorRawC;
+        doc["sensor_temperature_c"] = temperature;
+    } else {
+        doc["sensor_raw_c"] = nullptr;
+        doc["sensor_temperature_c"] = nullptr;
+    }
+    doc["sensor_callbacks"] = benchSensorCallbacks;
+    doc["sensor_completions"] = benchSensorCompletions;
+    doc["display_i2c_status"] = benchDisplayProbeStatus;
+    doc["display_init_ok"] = benchDisplayInitOk;
+    doc["display_off_callbacks"] = benchDisplayOffCallbacks;
+    doc["source"] = "[TEST] Actual DS18 GPIO18; zero offset; I2C21/22; sensor-valid flag gates measurements; heating disabled";
+#else
+    doc["relay_simulated"] = boilerState;
+    doc["source"] = "[MOCKED!] Fixed 70 C; simulated relay; no physical IO";
+#endif
+    String payload;
+    serializeJson(doc, payload);
+    Serial.println(payload);
+    if (mqtt.isConnected())
+        mqtt.publish(BOILERSAVER_BENCH_MQTT_ROOT "/Diagnostics/Runtime", payload, false);
+}
+#endif

@@ -7,9 +7,37 @@
 
 #include "ConfigManager.h"
 
-#define APP_VERSION "4.0.4"
-#define VERSION_DATE "14.06.2026"
-#ifndef APP_NAME
+#define APP_VERSION "4.1.0"
+#define VERSION_DATE "31.10.2026"
+#ifndef BOILERSAVER_BENCH_TEST
+#define BOILERSAVER_BENCH_TEST 0
+#endif
+#ifndef BOILERSAVER_BENCH_FULL_IO
+#define BOILERSAVER_BENCH_FULL_IO 0
+#endif
+#if BOILERSAVER_BENCH_FULL_IO && !BOILERSAVER_BENCH_TEST
+#error "Full IO diagnostics require isolated bench mode"
+#endif
+#ifndef BOILERSAVER_BENCH_CM_FIX
+#define BOILERSAVER_BENCH_CM_FIX 0
+#endif
+#if BOILERSAVER_BENCH_CM_FIX && (!BOILERSAVER_BENCH_TEST || !BOILERSAVER_BENCH_FULL_IO)
+#error "CM freeze diagnostics require the isolated full station profile"
+#endif
+#if BOILERSAVER_BENCH_FULL_IO
+#undef APP_NAME
+#if BOILERSAVER_BENCH_CM_FIX
+#define APP_NAME "BoilerSaver-Test-COM8-CM4106 [TEST]"
+#define BOILERSAVER_BENCH_MQTT_ROOT "BoilerSaver-Test-COM8-CM4106"
+#else
+#define APP_NAME "BoilerSaver-Test-COM8-FullIO [TEST]"
+#define BOILERSAVER_BENCH_MQTT_ROOT "BoilerSaver-Test-COM8-FullIO"
+#endif
+#elif BOILERSAVER_BENCH_TEST
+#undef APP_NAME
+#define APP_NAME "BoilerSaver-Test-COM8 [MOCKED!]"
+#define BOILERSAVER_BENCH_MQTT_ROOT "BoilerSaver-Test-COM8"
+#elif !defined(APP_NAME)
 #define APP_NAME "Boiler-Saver"
 #endif
 
