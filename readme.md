@@ -2,6 +2,10 @@
 
 **Deployment status:** The 4.1.0 / CM 4.10.5 candidate failed the production gate with `ESP_RST_PANIC`. Production was returned to 4.0.4 with all 47 original settings preserved. Do not deploy the 4.1.0 candidate. See [the failure and coverage analysis](docs/superpowers/plans/2026-10-31-production-gate-failure.md).
 
+The current work branch identifies as 4.1.1 after relocating its CM test package
+into Git. This maintenance checkpoint does not resolve the historical panic or
+authorize production deployment. See [the workspace recovery record](docs/superpowers/plans/2026-11-01-workspace-recovery.md).
+
 This example is a larger real-world project based on the ConfigurationsManager library.
 It combines runtime controls, sensor input, optional MQTT integration, and Web UI configuration.
 

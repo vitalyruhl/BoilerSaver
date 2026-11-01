@@ -7,8 +7,8 @@
 
 #include "ConfigManager.h"
 
-#define APP_VERSION "4.1.0"
-#define VERSION_DATE "31.10.2026"
+#define APP_VERSION "4.1.1"
+#define VERSION_DATE "01.11.2026"
 #ifndef BOILERSAVER_BENCH_TEST
 #define BOILERSAVER_BENCH_TEST 0
 #endif
