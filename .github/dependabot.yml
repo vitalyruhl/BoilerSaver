@@ -1,0 +1,4 @@
+version: 2
+# This firmware uses PlatformIO, which is reviewed manually in platformio.ini.
+# No npm application or GitHub Actions workflow is committed in this repository.
+updates: []

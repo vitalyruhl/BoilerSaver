@@ -1,4 +1,4 @@
-"""Run only the resolved CM package's build hook; never substitute local sources."""
+"""Run the declared CM source hook, including the shared sibling checkout."""
 import os
 from pathlib import Path
 import subprocess
@@ -11,9 +11,15 @@ except ImportError:
     env = None
 
 
-def run_precompile(project_dir, active_env, defines):
+def run_precompile(project_dir, active_env, defines, dependencies=()):
     project_dir = Path(project_dir).resolve()
     package = project_dir / ".pio/libdeps" / active_env / "ESP32 Configuration Manager"
+    sources = [str(item).strip()[len("symlink://"):] for item in dependencies
+               if str(item).strip().startswith("symlink://")]
+    if len(sources) > 1:
+        raise ValueError("Declare exactly one shared CM source checkout")
+    if sources:
+        package = (project_dir / sources[0]).resolve()
     script = package / "tools/preCompile_script.py"
     if not script.is_file():
         raise FileNotFoundError(f"Resolved CM precompile script missing: {script}")
@@ -36,6 +42,6 @@ if env is not None:
     flags = list(env.ParseFlags(env.get("BUILD_FLAGS", "")).get("CPPDEFINES", []))
     flags += list(env.get("CPPDEFINES", []))
     defines = {item[0]: item[1] for item in flags if isinstance(item, (tuple, list)) and len(item) == 2}
-    run_precompile(env.get("PROJECT_DIR"), env.get("PIOENV"), defines)
+    run_precompile(env.get("PROJECT_DIR"), env.get("PIOENV"), defines, env.GetProjectOption("lib_deps", []))
 elif __name__ == "__main__":
     run_precompile(Path(__file__).resolve().parents[1], os.environ.get("PIOENV", "usb"), {})

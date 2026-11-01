@@ -1,0 +1,61 @@
+name: Bug report
+description: Report unexpected behavior in BoilerSaver.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Include a minimal example and the affected BoilerSaver version and CM checkout.
+        Remove passwords, tokens, WiFi credentials, and private configuration from
+        code, logs, and screenshots before sharing them.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and the affected feature.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: Include numbered steps, relevant commands, and a minimal reproduction and selected PlatformIO environment.
+    validations:
+      required: true
+  - type: input
+    id: cm_version
+    attributes:
+      label: BoilerSaver version and ConfigurationsManager commit
+      description: Include the firmware version and full CM source commit SHA, noting local changes.
+    validations:
+      required: true
+  - type: input
+    id: board
+    attributes:
+      label: ESP32 board or chip model
+      placeholder: Include the board name and chip variant, and the actual peripheral wiring when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: build_environment
+    attributes:
+      label: Framework and build environment
+      placeholder: >-
+        Include OS, PlatformIO Core version, selected environment, Espressif32
+        platform and Arduino framework versions. For Web UI issues, include
+        browser and CM versions. Mark unrelated items not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: Include the full error and backtrace when available. Remove credentials and private data.
+      render: text

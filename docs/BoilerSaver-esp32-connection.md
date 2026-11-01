@@ -1,6 +1,31 @@
-# ESP32 Connection overwiew (ESP32-WROOM-32 - my development board)
+# ESP32 wiring and operational mapping
 
-This document is a **project-specific** GPIO reference for an ESP32-WROOM-32 board.
+## Application profiles
+
+The normal application defaults use DS18B20 GPIO26, I2C SDA21/SCL22,
+boiler relay23, status LED2, reset input14, AP input13 and shower input19.
+Stored settings can override exposed sensor/IO pins. The normal OLED reset is4.
+
+The `testesp` profile is for the operator-confirmed COM8 station only:
+
+| Function | Station GPIO |
+| --- | --- |
+| DS18B20 | 18 |
+| I2C SDA / SCL | 21 / 22 |
+| OLED reset | -1 (not connected) |
+| Unloaded dummy boiler output | 25 |
+| Status LED | 26 |
+| Reset / shower / set inputs | 14 / 33 / 4 |
+| Reserved, unregistered relays | 19 / 27 / 23 |
+
+Test startup applies this mapping, DHCP and an isolated MQTT identity in RAM.
+Heating is disabled and the lower threshold is -1000 C. Never connect the dummy
+output to heating equipment or upload this mapping to the production unit.
+
+## Board capability reference
+
+The diagram below is an older board reference, not a source for profile wiring.
+Use the explicit operational mapping above and verify the actual wiring.
 
 ## Overview
 

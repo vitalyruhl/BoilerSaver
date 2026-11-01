@@ -35,6 +35,26 @@ class PackagePrecompileTests(unittest.TestCase):
             self.assertEqual(result["vite_live"], "1")
             self.assertEqual(result["pioenv"], "bench")
 
+    def test_declared_symlink_runs_original_source_hook(self):
+        # [MOCKED!] The dependency source stays in its original project directory.
+        base = ROOT / ".pio" / "wrapper-tests"
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as temp:
+            project = Path(temp)
+            package = project / "original-cm"
+            (package / "tools").mkdir(parents=True)
+            marker = project / "original-hook-ran.txt"
+            (package / "tools/preCompile_script.py").write_text(
+                "from pathlib import Path\n"
+                "Path('../original-hook-ran.txt').write_text('selected')\n",
+                encoding="utf-8",
+            )
+            spec = importlib.util.spec_from_file_location("package_wrapper", ROOT / "tools/precompile_wrapper.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.run_precompile(project, "usb", {}, ["symlink://original-cm"])
+            self.assertEqual(marker.read_text(), "selected")
+
     def test_missing_selected_package_fails_closed(self):
         spec = importlib.util.spec_from_file_location("package_wrapper", ROOT / "tools/precompile_wrapper.py")
         module = importlib.util.module_from_spec(spec)

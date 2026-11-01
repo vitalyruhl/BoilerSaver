@@ -8,7 +8,28 @@
 secrets.h
 /__Temp/*
 
-# Serena: keep .serena/project.yml tracked; ignore local runtime state.
-/.serena/cache/
-/.serena/memories/
-/.serena/project.local.yml
+# Local instructions, agent state and investigation evidence.
+/AGENTS*.md
+/.github/AGENTS*.md
+/.github/agents/
+/.github/skills/
+/.github/instructions/
+/.github/FUNDING.yml
+/.agents/
+/.codex/
+/.serena/
+/.projectatlas/
+/.context-mode/
+/.claude/
+/.cursor/
+/.mcp.json
+/CLAUDE.md
+/tools/governance/
+/.Temp/
+/__Temp/
+/docs/superpowers/
+/dev-info/agent-new-prompts.md
+/compile_commands.json
+/upload.log
+/wrapper_debug.log
+**/__pycache__/
